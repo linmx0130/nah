@@ -1,9 +1,11 @@
 mod config;
+mod mcp;
 mod types;
 
 use clap::Parser;
 use config::load_mcp_servers_config;
-use std::collections::HashMap;
+use mcp::{MCPNotification, MCPRequest, MCPResponse};
+use std::cell::RefCell;
 use std::io::BufReader;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
@@ -37,16 +39,42 @@ fn main() {
     // server_command.stdout(Stdio::inherit());
 
     let mut server_process = server_command.spawn().unwrap();
-    let mut child_stdin = server_process.stdin.take().unwrap();
-    child_stdin.write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"initialize\",\"id\":1, \"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"nah\",\"version\":\"0.1\"}}}\n").unwrap();
-    child_stdin.flush().unwrap();
+    let child_stdin = RefCell::new(server_process.stdin.take().unwrap());
+    let initialize_request = MCPRequest::initialize("1", "nah", "0.1");
+    let data = serde_json::to_string(&initialize_request).unwrap();
+    child_stdin.borrow_mut().write_all(data.as_bytes()).unwrap();
+    child_stdin.borrow_mut().write(b"\n").unwrap();
+    child_stdin.borrow_mut().flush().unwrap();
 
-    let mut child_stdout = server_process.stdout.take().unwrap();
-    let mut child_stdout_reader = BufReader::new(child_stdout);
+    let child_stdout = server_process.stdout.take().unwrap();
+    let child_stdout_reader = RefCell::new(BufReader::new(child_stdout));
     let mut buf = String::new();
     println!("Waiting for result");
-    child_stdout_reader.read_line(&mut buf).unwrap();
-    println!("{:?}", buf);
+    child_stdout_reader
+      .borrow_mut()
+      .read_line(&mut buf)
+      .unwrap();
+    let response = serde_json::from_str::<MCPResponse>(buf.strip_suffix("\n").unwrap()).unwrap();
+    let initialized_notification = MCPNotification::initialized();
+    child_stdin
+      .borrow_mut()
+      .write_all(
+        serde_json::to_string(&initialized_notification)
+          .unwrap()
+          .as_bytes(),
+      )
+      .unwrap();
+    child_stdin.borrow_mut().write(b"\n").unwrap();
+    child_stdin.borrow_mut().flush().unwrap();
+    println!(
+      "Server initialized. Info: {:?}",
+      response
+        .result
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .get("serverInfo")
+    );
 
     println!("Termiante the server...");
     server_process.kill().expect("Failed to stop the server");
