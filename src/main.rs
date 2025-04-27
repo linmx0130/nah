@@ -1,4 +1,5 @@
 mod config;
+mod json_schema;
 mod mcp;
 mod types;
 
@@ -33,6 +34,11 @@ fn main() {
     println!("Available tools:");
     for item in tools.iter() {
       println!(" - {}", item.name);
+      println!("   input schema: {:?}", item.input_schema);
+      println!(
+        "   input template: \n{}",
+        json_schema::create_instance_template(&item.input_schema).unwrap()
+      )
     }
 
     println!("Termiante the server...");

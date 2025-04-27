@@ -53,4 +53,11 @@ impl NahError {
       message: format!("Received invalid response from MCP Server {}", server_name),
     }
   }
+
+  pub fn received_invalid_json_schema(message: &str) -> NahError {
+    NahError {
+      code: 7,
+      message: format!("Received invalid JSON Schema: {}", message),
+    }
+  }
 }
