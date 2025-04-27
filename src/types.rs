@@ -27,13 +27,18 @@ impl NahError {
       message: format!("Invalid value error: {}", message),
     }
   }
-}
 
-/**
- * Describes how to launch a MCP server with a command.
- */
-#[derive(Debug, Deserialize)]
-pub struct MCPServerCommand {
-  pub command: String,
-  pub args: Vec<String>,
+  pub fn mcp_server_communication_error(server_name: &str) -> NahError {
+    NahError {
+      code: 3,
+      message: format!("MCP server communication error with {}", server_name),
+    }
+  }
+
+  pub fn mcp_server_process_launch_error(server_name: &str) -> NahError {
+    NahError {
+      code: 4,
+      message: format!("Failed to launch MCP server process: {}", server_name),
+    }
+  }
 }
