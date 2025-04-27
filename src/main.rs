@@ -3,6 +3,7 @@ mod json_schema;
 mod mcp;
 mod types;
 
+use std::collections::HashMap;
 use clap::Parser;
 use config::load_mcp_servers_config;
 use mcp::MCPServerProcess;
@@ -15,7 +16,7 @@ struct Cli {
   mcp_config_file: PathBuf,
 }
 
-fn main() {
+fn main() -> std::io::Result<()>{
   let args = Cli::parse();
   println!("Config file: {:?}", args.mcp_config_file);
   let data = load_mcp_servers_config(args.mcp_config_file).unwrap();
@@ -24,7 +25,7 @@ fn main() {
     println!(" - {}", server);
   }
 
-  // let mut server_processes : HashMap<String, std::process::Child> = HashMap::new();
+  let mut server_processes : HashMap<String, MCPServerProcess> = HashMap::new();
   for (server_name, command) in data.iter() {
     println!("Launching server: {}", server_name);
 
@@ -34,18 +35,16 @@ fn main() {
     println!("Available tools:");
     for item in tools.iter() {
       println!(" - {}", item.name);
-      item.description.as_ref().and_then(|desc| {
-        println!("Description: ");
-        println!("{}", &desc);
-        Some(())
-      });
-      println!(
-        "Argument template: \n{}",
-        json_schema::create_instance_template(&item.input_schema).unwrap()
-      )
     }
-
-    println!("Termiante the server...");
-    process.kill().unwrap();
+    server_processes.insert(server_name.to_owned(), process);
   }
+
+  println!("Terminate MCP servers..");
+  server_processes.iter_mut().for_each(|(name, server)| {
+    if server.kill().is_err() {
+        println!("Failed to terminate server: {}", name);
+    }
+  });
+
+  Ok(())
 }
