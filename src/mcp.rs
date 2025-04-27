@@ -146,11 +146,10 @@ impl MCPServerProcess {
       stdout: stdout_reader,
     };
 
-    let initialize_request = MCPRequest::initialize("1", "nah", "0.1");
-    result.send_data(initialize_request)?;
+    let initialize_request =
+      MCPRequest::initialize(&uuid::Uuid::new_v4().to_string(), "nah", "0.1");
+    let response: MCPResponse = result.send_and_wait_for_response(initialize_request)?;
     let initialized_notification = MCPNotification::initialized();
-    let mut buf = String::new();
-    let response: MCPResponse = result.receive_data(&mut buf)?;
     result.send_data(initialized_notification)?;
 
     println!(
@@ -168,7 +167,7 @@ impl MCPServerProcess {
   /**
    * Send a piece of data to the MCP Server.
    */
-  pub fn send_data<T>(&mut self, request: T) -> Result<(), NahError>
+  fn send_data<T>(&mut self, request: T) -> Result<(), NahError>
   where
     T: serde::Serialize,
   {
@@ -186,7 +185,7 @@ impl MCPServerProcess {
   /**
    * Load and deserialize a piece of data from the MCP Server.
    */
-  pub fn receive_data<'b, T>(&mut self, buf: &'b mut String) -> Result<T, NahError>
+  fn receive_data<'b, T>(&mut self, buf: &'b mut String) -> Result<T, NahError>
   where
     T: serde::Deserialize<'b>,
   {
@@ -195,6 +194,38 @@ impl MCPServerProcess {
     }
     let response = serde_json::from_str::<T>(buf.strip_suffix("\n").unwrap()).unwrap();
     Ok(response)
+  }
+
+  /**
+   * Send a MCP Request and wait for its response. This method will ignore all non-relevent messages for now.
+   */
+  pub fn send_and_wait_for_response(
+    &mut self,
+    request: MCPRequest,
+  ) -> Result<MCPResponse, NahError> {
+    let id = request.id.clone();
+    self.send_data(request)?;
+    let mut buf = String::new();
+    loop {
+      let incoming_data: Value = self.receive_data(&mut buf)?;
+      match incoming_data
+        .as_object()
+        .and_then(|obj| obj.get("id"))
+        .and_then(|v| v.as_str())
+      {
+        None => {
+          // Not a response. Ignore for now.
+        }
+        Some(incoming_id) => {
+          if incoming_id == id {
+            return match serde_json::from_value::<MCPResponse>(incoming_data) {
+              Ok(resp) => Ok(resp),
+              Err(_e) => Err(NahError::mcp_server_invalid_response(&self.server_name)),
+            };
+          }
+        }
+      }
+    }
   }
 
   /**
@@ -210,9 +241,7 @@ impl MCPServerProcess {
   pub fn fetch_tools(&mut self) -> Result<Vec<MCPToolDefinition>, NahError> {
     let id = Uuid::new_v4().to_string();
     let request = MCPRequest::tools_list(&id);
-    self.send_data(request)?;
-    let mut buf = String::new();
-    let response: MCPResponse = self.receive_data(&mut buf)?;
+    let response = self.send_and_wait_for_response(request)?;
 
     let result = match response.result {
       None => {

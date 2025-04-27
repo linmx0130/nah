@@ -34,9 +34,13 @@ fn main() {
     println!("Available tools:");
     for item in tools.iter() {
       println!(" - {}", item.name);
-      println!("   input schema: {:?}", item.input_schema);
+      item.description.as_ref().and_then(|desc| {
+        println!("Description: ");
+        println!("{}", &desc);
+        Some(())
+      });
       println!(
-        "   input template: \n{}",
+        "Argument template: \n{}",
         json_schema::create_instance_template(&item.input_schema).unwrap()
       )
     }
