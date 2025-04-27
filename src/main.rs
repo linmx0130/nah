@@ -28,7 +28,14 @@ fn main() {
     println!("Launching server: {}", server_name);
 
     let mut process = MCPServerProcess::start_and_init(server_name, command).unwrap();
+    let tools = process.fetch_tools().unwrap();
+
+    println!("Available tools:");
+    for item in tools.iter() {
+      println!(" - {}", item.name);
+    }
+
     println!("Termiante the server...");
-    process.process.kill().expect("Failed to stop the server");
+    process.kill().unwrap();
   }
 }

@@ -1,5 +1,3 @@
-use serde::Deserialize;
-
 #[derive(Debug)]
 pub struct NahError {
   code: i32,
@@ -39,6 +37,20 @@ impl NahError {
     NahError {
       code: 4,
       message: format!("Failed to launch MCP server process: {}", server_name),
+    }
+  }
+
+  pub fn mcp_server_error(server_name: &str, message: &str) -> NahError {
+    NahError {
+      code: 5,
+      message: format!("Error from MCP Server {}: {}", server_name, message),
+    }
+  }
+
+  pub fn mcp_server_invalid_response(server_name: &str) -> NahError {
+    NahError {
+      code: 6,
+      message: format!("Received invalid response from MCP Server {}", server_name),
     }
   }
 }

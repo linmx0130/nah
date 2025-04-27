@@ -4,12 +4,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-  cell::{Ref, RefCell},
-  io::{BufRead, BufReader, Stdin, Stdout, Write},
+  io::{BufRead, BufReader, Write},
   process::{Child, ChildStdin, ChildStdout, Command, Stdio},
 };
+use uuid::Uuid;
 
-use crate::{mcp, types::NahError};
+use crate::types::NahError;
 /**
  * MCP Request is a JSON-RPC request with id enabled.
  */
@@ -22,6 +22,9 @@ pub struct MCPRequest {
 }
 
 impl MCPRequest {
+  /**
+   * Request to initialize the server.
+   */
   pub fn initialize(id: &str, client_name: &str, client_version: &str) -> Self {
     let params = Some(json!({
         "protocolVersion": "2024-11-05",
@@ -36,6 +39,18 @@ impl MCPRequest {
       method: "initialize".to_string(),
       id: id.to_string(),
       params,
+    }
+  }
+
+  /**
+   * Request to fetch the list of available tools from `tools/list`.
+   */
+  pub fn tools_list(id: &str) -> Self {
+    MCPRequest {
+      jsonrpc: "2.0".to_string(),
+      method: "tools/list".to_string(),
+      id: id.to_string(),
+      params: None,
     }
   }
 }
@@ -81,13 +96,25 @@ pub struct MCPServerCommand {
 }
 
 /**
+ * Describe a MCP tool.
+ */
+#[derive(Debug, Deserialize)]
+pub struct MCPToolDefinition {
+  pub name: String,
+  pub description: Option<String>,
+  #[serde(rename = "inputSchema")]
+  pub input_schema: Value,
+  pub annotaions: Option<Value>,
+}
+
+/**
  * Wrapper of a MCP server process.
  */
 pub struct MCPServerProcess {
   pub server_name: String,
-  pub process: Child,
-  pub stdin: ChildStdin,
-  pub stdout: BufReader<ChildStdout>,
+  process: Child,
+  stdin: ChildStdin,
+  stdout: BufReader<ChildStdout>,
 }
 
 impl MCPServerProcess {
@@ -168,5 +195,60 @@ impl MCPServerProcess {
     }
     let response = serde_json::from_str::<T>(buf.strip_suffix("\n").unwrap()).unwrap();
     Ok(response)
+  }
+
+  /**
+   * Kill the process.
+   */
+  pub fn kill(&mut self) -> std::io::Result<()> {
+    self.process.kill()
+  }
+
+  /**
+   * Fetch the list of tools from the MCP Server.
+   */
+  pub fn fetch_tools(&mut self) -> Result<Vec<MCPToolDefinition>, NahError> {
+    let id = Uuid::new_v4().to_string();
+    let request = MCPRequest::tools_list(&id);
+    self.send_data(request)?;
+    let mut buf = String::new();
+    let response: MCPResponse = self.receive_data(&mut buf)?;
+
+    let result = match response.result {
+      None => {
+        return Err(match response.error {
+          None => NahError::mcp_server_communication_error(&self.server_name),
+          Some(err) => NahError::mcp_server_error(
+            &self.server_name,
+            &serde_json::to_string_pretty(&err).unwrap(),
+          ),
+        });
+      }
+      Some(res) => {
+        let tools = match res
+          .as_object()
+          .and_then(|v| v.get("tools"))
+          .and_then(|v| v.as_array())
+        {
+          None => {
+            return Err(NahError::mcp_server_invalid_response(&self.server_name));
+          }
+          Some(t) => t,
+        };
+
+        let mut result = Vec::with_capacity(tools.len());
+        for item in tools.iter() {
+          let tool: MCPToolDefinition = match serde_json::from_value(item.clone()) {
+            Ok(t) => t,
+            Err(_e) => {
+              return Err(NahError::mcp_server_invalid_response(&self.server_name));
+            }
+          };
+          result.push(tool);
+        }
+        result
+      }
+    };
+    Ok(result)
   }
 }
