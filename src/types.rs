@@ -1,7 +1,7 @@
 #[derive(Debug)]
 pub struct NahError {
-  code: i32,
-  message: String,
+  pub code: i32,
+  pub message: String,
 }
 
 impl std::fmt::Display for NahError {
@@ -58,6 +58,13 @@ impl NahError {
     NahError {
       code: 7,
       message: format!("Received invalid JSON Schema: {}", message),
+    }
+  }
+
+  pub fn editor_error(message: &str) -> NahError {
+    NahError {
+      code: 8,
+      message: format!("Failed on running editor: {}", message),
     }
   }
 }

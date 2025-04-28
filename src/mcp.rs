@@ -3,11 +3,11 @@
  */
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::{
   io::{BufRead, BufReader, Write},
   process::{Child, ChildStdin, ChildStdout, Command, Stdio},
 };
-use uuid::Uuid;
 
 use crate::types::NahError;
 /**
@@ -51,6 +51,20 @@ impl MCPRequest {
       method: "tools/list".to_string(),
       id: id.to_string(),
       params: None,
+    }
+  }
+
+  pub fn tools_call(id: &str, tool_name: &str, args: &Value) -> Self {
+    MCPRequest {
+      jsonrpc: "2.0".to_string(),
+      method: "tools/call".to_string(),
+      id: id.to_string(),
+      params: Some(json!(
+        {
+        "name": tool_name,
+        "arguments": args,
+        }
+      )),
     }
   }
 }
@@ -115,6 +129,7 @@ pub struct MCPServerProcess {
   process: Child,
   stdin: ChildStdin,
   stdout: BufReader<ChildStdout>,
+  tool_cache: HashMap<String, MCPToolDefinition>,
 }
 
 impl MCPServerProcess {
@@ -128,6 +143,7 @@ impl MCPServerProcess {
     }
     server_command.stdin(Stdio::piped());
     server_command.stdout(Stdio::piped());
+    server_command.stderr(Stdio::null());
     let mut server_process = match server_command.spawn() {
       Ok(p) => p,
       Err(_e) => {
@@ -144,6 +160,7 @@ impl MCPServerProcess {
       process: server_process,
       stdin,
       stdout: stdout_reader,
+      tool_cache: HashMap::new(),
     };
 
     let initialize_request =
@@ -238,8 +255,8 @@ impl MCPServerProcess {
   /**
    * Fetch the list of tools from the MCP Server.
    */
-  pub fn fetch_tools(&mut self) -> Result<Vec<MCPToolDefinition>, NahError> {
-    let id = Uuid::new_v4().to_string();
+  pub fn fetch_tools(&mut self) -> Result<Vec<&MCPToolDefinition>, NahError> {
+    let id: String = uuid::Uuid::new_v4().to_string();
     let request = MCPRequest::tools_list(&id);
     let response = self.send_and_wait_for_response(request)?;
 
@@ -265,7 +282,7 @@ impl MCPServerProcess {
           Some(t) => t,
         };
 
-        let mut result = Vec::with_capacity(tools.len());
+        self.tool_cache.clear();
         for item in tools.iter() {
           let tool: MCPToolDefinition = match serde_json::from_value(item.clone()) {
             Ok(t) => t,
@@ -273,11 +290,50 @@ impl MCPServerProcess {
               return Err(NahError::mcp_server_invalid_response(&self.server_name));
             }
           };
-          result.push(tool);
+          self.tool_cache.insert(tool.name.clone(), tool);
         }
-        result
+        self.tool_cache.values().collect()
       }
     };
     Ok(result)
+  }
+
+  pub fn get_tool_definition(&mut self, tool_name: &str) -> Result<&MCPToolDefinition, NahError> {
+    if self.tool_cache.contains_key(tool_name) {
+      Ok(self.tool_cache.get(tool_name).unwrap())
+    } else {
+      // re-fetch tool list
+      self.fetch_tools()?;
+      match self.tool_cache.get(tool_name) {
+        Some(p) => Ok(p),
+        None => Err(NahError::invalid_value(&format!(
+          "Invalid tool name: {}",
+          tool_name
+        ))),
+      }
+    }
+  }
+
+  /**
+   * Call the tool and wait for the response. Return value is the result object.
+   */
+  pub fn call_tool(&mut self, tool_name: &str, args: &Value) -> Result<Value, NahError> {
+    let id: String = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::tools_call(&id, tool_name, args);
+    let response = self.send_and_wait_for_response(request)?;
+
+    match response.result {
+      Some(r) => Ok(r),
+      None => match response.error {
+        Some(e) => Err(NahError::mcp_server_error(
+          &self.server_name,
+          &serde_json::to_string(&e).unwrap(),
+        )),
+        None => Err(NahError::mcp_server_error(
+          &self.server_name,
+          "unknown error",
+        )),
+      },
+    }
   }
 }

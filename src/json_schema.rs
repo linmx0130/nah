@@ -17,7 +17,8 @@ enum JSONSchemaTypeName {
  * Create a JSON instance template from a JSON Schema.
  */
 pub fn create_instance_template(schema: &Value) -> Result<String, NahError> {
-  let lines = create_instance_template_impl(schema, 0)?;
+  let mut lines = create_instance_template_impl(schema, 0)?;
+  lines.last_mut().unwrap().pop();
   Ok(lines.join("\n"))
 }
 
@@ -41,13 +42,14 @@ fn create_instance_template_impl(schema: &Value, indent: usize) -> Result<Vec<St
         let field_template = create_instance_template_impl(field_schema, indent + 4)?;
         // grab the first line to connect field_name;
         result.push(format!(
-          "{}    {}: {}",
+          "{}    \"{}\": {}",
           indent_string, field_name, field_template[0]
         ));
         for i in 1..field_template.len() {
           result.push(field_template[i].clone());
         }
       }
+      result.last_mut().unwrap().pop();
       result.push(format!("{}}},", indent_string));
       Ok(result)
     }
