@@ -223,18 +223,27 @@ impl MCPServerProcess {
     self.send_data(request)?;
     let mut buf = String::new();
     loop {
-      let incoming_data: Value = self.receive_data(&mut buf)?;
-      match incoming_data
-        .as_object()
-        .and_then(|obj| obj.get("id"))
-        .and_then(|v| v.as_str())
-      {
+      let incoming_msg = self.receive_data::<Value>(&mut buf)?;
+      let incoming_obj = incoming_msg.as_object();
+      if incoming_obj.is_none() {
+        continue;
+      }
+      let incoming_data = incoming_obj.unwrap();
+      match incoming_data.get("id").and_then(|v| v.as_str()) {
         None => {
-          // Not a response. Ignore for now.
+          // Try to unpack the message as a notification
+          match serde_json::from_value::<MCPNotification>(incoming_msg) {
+            Ok(notif) => {
+              self.process_notification(notif);
+            }
+            _ => {
+              // Unknown message. Ignore it for now.
+            }
+          }
         }
         Some(incoming_id) => {
           if incoming_id == id {
-            return match serde_json::from_value::<MCPResponse>(incoming_data) {
+            return match serde_json::from_value::<MCPResponse>(incoming_msg) {
               Ok(resp) => Ok(resp),
               Err(_e) => Err(NahError::mcp_server_invalid_response(&self.server_name)),
             };
@@ -242,6 +251,14 @@ impl MCPServerProcess {
         }
       }
     }
+  }
+
+  /**
+   * Handling incoming notification.
+   */
+  fn process_notification(&mut self, notification: MCPNotification) {
+    eprintln!("Received notification, method ={}", notification.method);
+    // TODO: process the notification
   }
 
   /**
