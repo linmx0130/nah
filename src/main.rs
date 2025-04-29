@@ -45,7 +45,18 @@ fn main() -> std::io::Result<()> {
   for (server_name, command) in data.iter() {
     println!("Launching server: {}", server_name);
 
-    let mut process = MCPServerProcess::start_and_init(server_name, command).unwrap();
+    let mut process = match MCPServerProcess::start_and_init(server_name, command) {
+      Err(e) => {
+        println!(
+          "Fatal error while launching {}, give up this server.",
+          server_name
+        );
+        println!("Error: {}", e);
+        continue;
+      }
+      Ok(p) => p,
+    };
+
     let tools = process.fetch_tools().unwrap();
 
     println!("Available tools:");
@@ -103,6 +114,7 @@ impl AppContext {
           "list_tools" => self.process_list_tools(),
           "inspect_tool" => self.process_inspect_tool(&command_parts),
           "call_tool" => self.process_call_tool(&command_parts),
+          "list_resources" => self.process_list_resources(),
           _ => {
             println!("Invalid command: {}", key);
           }
@@ -271,17 +283,33 @@ MCP server of `server_name` will be used as the current server."
       }
     }
   }
+
+  fn process_list_resources(&mut self) {
+    match &self.current_server {
+      Some(server_name) => {
+        let server_process = self.server_processes.get_mut(server_name).unwrap();
+        let resources = server_process.resources_list().unwrap();
+        for item in resources.iter() {
+          println!(" * {}", item.name);
+        }
+      }
+      None => {
+        println!("No server is selected. Run `use` command to select a server.")
+      }
+    }
+  }
 }
 
 fn print_help() {
   println!(
     "\
 Command list of nah: \n\
-* use:           Select a MCP server to interactive with. \n\
-* list_tools:    List all tools on the current server.\n\
-* inspect_tool:  Inspect detailed info of a tool.\n\
-* call_tool:     Call a tool on the current server.\n\
-* exit:          Stop all server and exit nah."
+* use:             Select a MCP server to interactive with. \n\
+* list_tools:      List all tools on the current server.\n\
+* inspect_tool:    Inspect detailed info of a tool.\n\
+* call_tool:       Call a tool on the current server.\n\
+* list_resources:  List all resources on the current server\n\
+* exit:            Stop all server and exit nah."
   );
 }
 

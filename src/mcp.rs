@@ -54,6 +54,9 @@ impl MCPRequest {
     }
   }
 
+  /**
+   * Request to call a tool.
+   */
   pub fn tools_call(id: &str, tool_name: &str, args: &Value) -> Self {
     MCPRequest {
       jsonrpc: "2.0".to_string(),
@@ -65,6 +68,18 @@ impl MCPRequest {
         "arguments": args,
         }
       )),
+    }
+  }
+
+  /**
+   * Request to fetch the list of available resources from `resources/list`.
+   */
+  pub fn resources_list(id: &str) -> Self {
+    MCPRequest {
+      jsonrpc: "2.0".to_string(),
+      method: "resources/list".to_owned(),
+      id: id.to_string(),
+      params: None,
     }
   }
 }
@@ -118,6 +133,19 @@ pub struct MCPToolDefinition {
   pub description: Option<String>,
   #[serde(rename = "inputSchema")]
   pub input_schema: Value,
+}
+
+/**
+ * Describe a MCP Resource.
+ */
+#[derive(Debug, Deserialize)]
+pub struct MCPResourceDefinition {
+  pub uri: String,
+  pub name: String,
+  pub description: Option<String>,
+  #[serde(rename = "mimeType")]
+  pub mime_type: Option<String>,
+  pub size: Option<usize>,
 }
 
 /**
@@ -208,8 +236,14 @@ impl MCPServerProcess {
     if self.stdout.read_line(buf).is_err() {
       return Err(NahError::mcp_server_communication_error(&self.server_name));
     }
-    let response = serde_json::from_str::<T>(buf.strip_suffix("\n").unwrap()).unwrap();
-    Ok(response)
+    let response_json = match buf.strip_suffix("\n") {
+      Some(v) => v,
+      None => buf,
+    };
+    match serde_json::from_str::<T>(response_json) {
+      Ok(r) => Ok(r),
+      Err(_e) => Err(NahError::mcp_server_invalid_response(&self.server_name)),
+    }
   }
 
   /**
@@ -314,6 +348,9 @@ impl MCPServerProcess {
     Ok(result)
   }
 
+  /**
+   * Get the definition of a given tool name. It may try to read the tool from cached results.
+   */
   pub fn get_tool_definition(&mut self, tool_name: &str) -> Result<&MCPToolDefinition, NahError> {
     if self.tool_cache.contains_key(tool_name) {
       Ok(self.tool_cache.get(tool_name).unwrap())
@@ -340,16 +377,46 @@ impl MCPServerProcess {
 
     match response.result {
       Some(r) => Ok(r),
-      None => match response.error {
-        Some(e) => Err(NahError::mcp_server_error(
-          &self.server_name,
-          &serde_json::to_string(&e).unwrap(),
-        )),
-        None => Err(NahError::mcp_server_error(
-          &self.server_name,
-          "unknown error",
-        )),
-      },
+      None => Err(self.parse_response_error(&response)),
+    }
+  }
+
+  /**
+   * Fetch the list of available resources.
+   */
+  pub fn resources_list(&mut self) -> Result<Vec<MCPResourceDefinition>, NahError> {
+    let id: String = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::resources_list(&id);
+    let response = self.send_and_wait_for_response(request)?;
+    match response.result {
+      Some(res) => {
+        let resources = res
+          .as_object()
+          .and_then(|obj| obj.get("resources"))
+          .and_then(|v| v.as_array());
+        if resources.is_none() {
+          return Err(NahError::mcp_server_invalid_response(&self.server_name));
+        }
+        Ok(
+          resources
+            .unwrap()
+            .iter()
+            .map(|v| serde_json::from_value::<MCPResourceDefinition>(v.clone()))
+            .filter_map(|r| match r {
+              Ok(v) => Some(v),
+              Err(_) => None,
+            })
+            .collect(),
+        )
+      }
+      None => Err(self.parse_response_error(&response)),
+    }
+  }
+
+  fn parse_response_error(&self, response: &MCPResponse) -> NahError {
+    match &response.error {
+      Some(e) => NahError::mcp_server_error(&self.server_name, &serde_json::to_string(e).unwrap()),
+      None => NahError::mcp_server_error(&self.server_name, "unknown error"),
     }
   }
 }
