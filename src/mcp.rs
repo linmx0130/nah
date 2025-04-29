@@ -118,7 +118,6 @@ pub struct MCPToolDefinition {
   pub description: Option<String>,
   #[serde(rename = "inputSchema")]
   pub input_schema: Value,
-  pub annotaions: Option<Value>,
 }
 
 /**
