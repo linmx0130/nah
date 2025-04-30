@@ -82,6 +82,21 @@ impl MCPRequest {
       params: None,
     }
   }
+
+  /**
+   * Request to read a resource.
+   */
+  pub fn resources_read(id: &str, uri: &str) -> Self {
+    MCPRequest {
+      jsonrpc: "2.0".to_string(),
+      method: "resources/read".to_owned(),
+      id: id.to_string(),
+      params: Some(json!(
+      {
+        "uri": uri.to_string()
+      })),
+    }
+  }
 }
 
 /**
@@ -146,6 +161,17 @@ pub struct MCPResourceDefinition {
   #[serde(rename = "mimeType")]
   pub mime_type: Option<String>,
   pub size: Option<usize>,
+}
+
+/**
+ * Describe a MCP Resource content.
+ */
+#[derive(Debug, Deserialize, Serialize)]
+pub struct MCPResourceContent {
+  pub uri: String,
+  pub mime: Option<String>,
+  pub text: Option<String>,
+  pub blob: Option<String>,
 }
 
 /**
@@ -411,6 +437,39 @@ impl MCPServerProcess {
       }
       None => Err(self.parse_response_error(&response)),
     }
+  }
+
+  pub fn read_resources(&mut self, uri: &str) -> Result<Vec<MCPResourceContent>, NahError> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::resources_read(&id, uri);
+    let response = self.send_and_wait_for_response(request)?;
+    let contents = match response
+      .result
+      .as_ref()
+      .and_then(|result| result.as_object())
+      .and_then(|result_obj| result_obj.get("contents"))
+      .and_then(|contents| contents.as_array())
+    {
+      Some(r) => r,
+      None => return Err(self.parse_response_error(&response)),
+    };
+
+    Ok(
+      contents
+        .iter()
+        .map(|v| serde_json::from_value::<MCPResourceContent>(v.clone()))
+        .filter_map(|v| match v {
+          Ok(r) => {
+            if r.text.is_none() && r.blob.is_none() {
+              None
+            } else {
+              Some(r)
+            }
+          }
+          Err(_) => None,
+        })
+        .collect(),
+    )
   }
 
   fn parse_response_error(&self, response: &MCPResponse) -> NahError {

@@ -115,6 +115,7 @@ impl AppContext {
           "inspect_tool" => self.process_inspect_tool(&command_parts),
           "call_tool" => self.process_call_tool(&command_parts),
           "list_resources" => self.process_list_resources(),
+          "read_resources" => self.process_read_resources(&command_parts),
           _ => {
             println!("Invalid command: {}", key);
           }
@@ -298,6 +299,30 @@ MCP server of `server_name` will be used as the current server."
       }
     }
   }
+
+  fn process_read_resources(&mut self, command_parts: &Vec<&str>) {
+    if command_parts.len() != 2 {
+      println!("Usage: read_resource [Resource URI]");
+      return;
+    }
+    let uri = command_parts[1];
+    match &self.current_server {
+      Some(server_name) => {
+        let server_process = self.server_processes.get_mut(server_name).unwrap();
+        match server_process.read_resources(uri) {
+          Ok(r) => {
+            println!("Result: \n{}\n", serde_json::to_string_pretty(&r).unwrap());
+          }
+          Err(e) => {
+            println!("Received error: {}", e);
+          }
+        }
+      }
+      None => {
+        println!("No server is selected. Run `use` command to select a server.")
+      }
+    }
+  }
 }
 
 fn print_help() {
@@ -309,6 +334,7 @@ Command list of nah: \n\
 * inspect_tool:    Inspect detailed info of a tool.\n\
 * call_tool:       Call a tool on the current server.\n\
 * list_resources:  List all resources on the current server\n\
+* read_resources:  Read resources with a URI\n\
 * exit:            Stop all server and exit nah."
   );
 }
