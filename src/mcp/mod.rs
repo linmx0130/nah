@@ -42,7 +42,7 @@ pub struct MCPServerCommand {
 /**
  * Describe a MCP tool.
  */
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct MCPToolDefinition {
   pub name: String,
   pub description: Option<String>,
@@ -53,7 +53,7 @@ pub struct MCPToolDefinition {
 /**
  * Describe a MCP Resource.
  */
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct MCPResourceDefinition {
   pub uri: String,
   pub name: String,
@@ -83,6 +83,7 @@ pub struct MCPServerProcess {
   stdin: ChildStdin,
   stdout: Arc<Mutex<BufReader<ChildStdout>>>,
   tool_cache: HashMap<String, MCPToolDefinition>,
+  resource_cache: HashMap<String, MCPResourceDefinition>,
   timeout_ms: u64,
 }
 
@@ -115,6 +116,7 @@ impl MCPServerProcess {
       stdin,
       stdout: Arc::new(Mutex::new(stdout_reader)),
       tool_cache: HashMap::new(),
+      resource_cache: HashMap::new(),
       timeout_ms: 5000,
     };
 
@@ -347,7 +349,7 @@ impl MCPServerProcess {
   /**
    * Fetch the list of available resources.
    */
-  pub fn resources_list(&mut self) -> Result<Vec<MCPResourceDefinition>, NahError> {
+  pub fn fetch_resources_list(&mut self) -> Result<Vec<MCPResourceDefinition>, NahError> {
     let id: String = uuid::Uuid::new_v4().to_string();
     let request = MCPRequest::resources_list(&id);
     let response = self.send_and_wait_for_response(request)?;
@@ -360,19 +362,40 @@ impl MCPServerProcess {
         if resources.is_none() {
           return Err(NahError::mcp_server_invalid_response(&self.server_name));
         }
-        Ok(
-          resources
-            .unwrap()
-            .iter()
-            .map(|v| serde_json::from_value::<MCPResourceDefinition>(v.clone()))
-            .filter_map(|r| match r {
-              Ok(v) => Some(v),
-              Err(_) => None,
-            })
-            .collect(),
-        )
+        let result: Vec<MCPResourceDefinition> = resources
+          .unwrap()
+          .iter()
+          .map(|v| serde_json::from_value::<MCPResourceDefinition>(v.clone()))
+          .filter_map(|r| match r {
+            Ok(v) => Some(v),
+            Err(_) => None,
+          })
+          .collect();
+        self.resource_cache.clear();
+        for item in &result {
+          self.resource_cache.insert(item.name.clone(), item.clone());
+        }
+        Ok(result)
       }
       None => Err(self.parse_response_error(&response)),
+    }
+  }
+
+  pub fn get_resources_definition(
+    &mut self,
+    uri: &str,
+  ) -> Result<&MCPResourceDefinition, NahError> {
+    if self.resource_cache.contains_key(uri) {
+      Ok(self.resource_cache.get(uri).unwrap())
+    } else {
+      self.fetch_resources_list()?;
+      match self.resource_cache.get(uri) {
+        Some(p) => Ok(p),
+        None => Err(NahError::invalid_value(&format!(
+          "Invalid resource uri: {}",
+          uri
+        ))),
+      }
     }
   }
 

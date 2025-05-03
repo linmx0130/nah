@@ -109,6 +109,7 @@ impl AppContext {
           "inspect_tool" => self.process_inspect_tool(&command_parts),
           "call_tool" => self.process_call_tool(&command_parts),
           "list_resources" => self.process_list_resources(),
+          "inspect_resources" => self.process_inspect_resources(&command_parts),
           "read_resources" => self.process_read_resources(&command_parts),
           "set_timeout" => self.process_set_timeout(&command_parts),
           _ => {
@@ -271,9 +272,42 @@ MCP server of `server_name` will be used as the current server."
 
   fn process_list_resources(&mut self) {
     self.process_with_current_server(|_, server_process| {
-      let resources = server_process.resources_list().unwrap();
+      let resources = server_process.fetch_resources_list().unwrap();
       for item in resources.iter() {
         println!(" * {}", item.name);
+      }
+    });
+  }
+
+  fn process_inspect_resources(&mut self, command_parts: &Vec<&str>) {
+    if command_parts.len() != 2 {
+      println!("Usage: read_resource [Resource URI]");
+      return;
+    }
+    let uri = command_parts[1];
+    self.process_with_current_server(|_, server_process| {
+      match server_process.get_resources_definition(uri) {
+        Ok(r) => {
+          println!("Name: {}", r.name);
+          println!("URI: {}", r.uri);
+          let _ = r.size.as_ref().is_some_and(|v| {
+            println!("Size: {}", v);
+            true
+          });
+          let _ = r.mime_type.as_ref().is_some_and(|v| {
+            println!("MIME Type: {}", v);
+            true
+          });
+          let _ = r.description.as_ref().is_some_and(|v| {
+            println!("======");
+            println!("{}", v);
+            println!("======");
+            true
+          });
+        }
+        Err(e) => {
+          println!("Error: {}", e)
+        }
       }
     });
   }
@@ -342,14 +376,15 @@ fn print_help() {
   println!(
     "\
 Command list of nah: \n\
-* use:             Select a MCP server to interactive with. \n\
-* list_tools:      List all tools on the current server.\n\
-* inspect_tool:    Inspect detailed info of a tool.\n\
-* call_tool:       Call a tool on the current server.\n\
-* list_resources:  List all resources on the current server\n\
-* read_resources:  Read resources with a URI\n\
-* set_timeout:     Set communication timeout for the current server\n\
-* exit:            Stop all server and exit nah."
+* use:               Select a MCP server to interactive with. \n\
+* list_tools:        List all tools on the current server.\n\
+* inspect_tool:      Inspect detailed info of a tool.\n\
+* call_tool:         Call a tool on the current server.\n\
+* list_resources:    List all resources on the current server\n\
+* inspect_resources: Inspect detailed  info of a resource \n\
+* read_resources:    Read resources with a URI\n\
+* set_timeout:       Set communication timeout for the current server\n\
+* exit:              Stop all server and exit nah."
   );
 }
 
