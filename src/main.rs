@@ -151,25 +151,19 @@ MCP server of `server_name` will be used as the current server."
   }
 
   fn process_list_tools(&mut self) {
-    match &self.current_server {
-      Some(server_name) => {
-        let server_process = self.server_processes.get_mut(server_name).unwrap();
-        let tools = match server_process.fetch_tools() {
-          Ok(t) => t,
-          Err(e) => {
-            println!("Failed to fetch tool list: {}", e);
-            return;
-          }
-        };
-
-        for item in tools.iter() {
-          println!(" * {}", item.name);
+    self.process_with_current_server(|_server_name, server_process| {
+      let tools = match server_process.fetch_tools() {
+        Ok(t) => t,
+        Err(e) => {
+          println!("Failed to fetch tool list: {}", e);
+          return;
         }
+      };
+
+      for item in tools.iter() {
+        println!(" * {}", item.name);
       }
-      None => {
-        println!("No server is selected. Run `use` command to select a server.")
-      }
-    }
+    });
   }
 
   fn process_inspect_tool(&mut self, command_parts: &Vec<&str>) {
@@ -178,32 +172,26 @@ MCP server of `server_name` will be used as the current server."
       return;
     }
     let tool_name = command_parts[1];
-    match &self.current_server {
-      Some(server_name) => {
-        let server_process = self.server_processes.get_mut(server_name).unwrap();
-        let tool_def = server_process.get_tool_definition(tool_name);
-        match tool_def {
-          Ok(def) => {
-            println!("{}", def.name);
+    self.process_with_current_server(|server_name, server_process| {
+      let tool_def = server_process.get_tool_definition(tool_name);
+      match tool_def {
+        Ok(def) => {
+          println!("{}", def.name);
+          println!("======");
+          def.description.as_ref().and_then(|desc| {
+            println!("{desc}");
             println!("======");
-            def.description.as_ref().and_then(|desc| {
-              println!("{desc}");
-              println!("======");
-              Some(())
-            });
-          }
-          Err(e) => {
-            println!(
-              "Failed to load tool {} from server {} due to error: {}",
-              tool_name, server_name, e
-            );
-          }
+            Some(())
+          });
+        }
+        Err(e) => {
+          println!(
+            "Failed to load tool {} from server {} due to error: {}",
+            tool_name, server_name, e
+          );
         }
       }
-      None => {
-        println!("No server is selected. Run `use` command to select a server.")
-      }
-    }
+    });
   }
 
   fn process_call_tool(&mut self, command_parts: &Vec<&str>) {
@@ -212,94 +200,82 @@ MCP server of `server_name` will be used as the current server."
       return;
     }
     let tool_name = command_parts[1];
-    match &self.current_server {
-      Some(server_name) => {
-        let server_process = self.server_processes.get_mut(server_name).unwrap();
-        let tool_def = server_process.get_tool_definition(tool_name);
-        match tool_def {
-          Ok(def) => {
-            // create a temporary file for the request
-            let param_template = json_schema::create_instance_template(&def.input_schema);
-            match param_template {
-              Ok(template) => {
-                let temp_filename = format!(".nah_req.{}.args.json", tool_name);
-                match File::create(&temp_filename).and_then(|file: File| {
-                            let mut file = file;
-                            file.write_all(template.as_bytes())?;
-                            file.flush()?;
-                            Ok(())
-                        }) {
-                            Err(e) => println!("Failed to prepare file for argument template for tool calling {} > {} due to error: {}", server_name, tool_name, e),
-                            Ok(()) => {
-                                // load parameter and call tool
-                                let launch_editor_outcome = launch_editor(&temp_filename);
-                                if launch_editor_outcome.is_err() {
-                                    println!("{}", launch_editor_outcome.unwrap_err());
-                                    return;
-                                }
-                                let mut buf = String::new();
-                                let mut file = File::open(&temp_filename).unwrap();
-                                if file.read_to_string(&mut buf).is_err() {
-                                    println!("Failed to load the argument file. Call tool operation is interrupted.");
-                                    return;
-                                }
-                                match serde_json::from_str::<Value>(&buf) {
-                                    Err(_) => {
-                                        println!("Provided argument is invalid in JSON Format. Call tool operation is interrupted.");
-                                    }
-                                    Ok(params) => {
-                                        let result = server_process.call_tool(tool_name, &params);
-                                        match result {
-                                            Err(e) => {
-                                                println!("Received error: {}", e);
-                                            }
-                                            Ok(result) => {
-                                                println!("Result: \n{}\n", serde_json::to_string_pretty(&result).unwrap());
-                                            }
-                                        }
-                                    }
-                                }
-                                if std::fs::remove_file(&temp_filename).is_err() {
-                                    println!("Failed to clean up the temporary argument file.")
-                                }
-                            }
-                        }
-              }
-              Err(e) => {
-                println!(
-                  "Failed to prepare argment template for tool calling: {} > {} due to error: {}",
-                  server_name, tool_name, e
-                );
-              }
+    self.process_with_current_server(|server_name, server_process| {
+      let tool_def = server_process.get_tool_definition(tool_name);
+      match tool_def {
+        Ok(def) => {
+          // create a temporary file for the request
+          let param_template = json_schema::create_instance_template(&def.input_schema);
+          match param_template {
+            Ok(template) => {
+              let temp_filename = format!(".nah_req.{}.args.json", tool_name);
+              match File::create(&temp_filename).and_then(|file: File| {
+                          let mut file = file;
+                          file.write_all(template.as_bytes())?;
+                          file.flush()?;
+                          Ok(())
+                      }) {
+                          Err(e) => println!("Failed to prepare file for argument template for tool calling {} > {} due to error: {}", server_name, tool_name, e),
+                          Ok(()) => {
+                              // load parameter and call tool
+                              let launch_editor_outcome = launch_editor(&temp_filename);
+                              if launch_editor_outcome.is_err() {
+                                  println!("{}", launch_editor_outcome.unwrap_err());
+                                  return;
+                              }
+                              let mut buf = String::new();
+                              let mut file = File::open(&temp_filename).unwrap();
+                              if file.read_to_string(&mut buf).is_err() {
+                                  println!("Failed to load the argument file. Call tool operation is interrupted.");
+                                  return;
+                              }
+                              match serde_json::from_str::<Value>(&buf) {
+                                  Err(_) => {
+                                      println!("Provided argument is invalid in JSON Format. Call tool operation is interrupted.");
+                                  }
+                                  Ok(params) => {
+                                      let result = server_process.call_tool(tool_name, &params);
+                                      match result {
+                                          Err(e) => {
+                                              println!("Received error: {}", e);
+                                          }
+                                          Ok(result) => {
+                                              println!("Result: \n{}\n", serde_json::to_string_pretty(&result).unwrap());
+                                          }
+                                      }
+                                  }
+                              }
+                              if std::fs::remove_file(&temp_filename).is_err() {
+                                  println!("Failed to clean up the temporary argument file.")
+                              }
+                          }
+                      }
+            }
+            Err(e) => {
+              println!(
+                "Failed to prepare argment template for tool calling: {} > {} due to error: {}",
+                server_name, tool_name, e
+              );
             }
           }
-          Err(e) => {
-            println!(
-              "Failed to load tool {} from server {} due to error: {}",
-              tool_name, server_name, e
-            );
-          }
+        }
+        Err(e) => {
+          println!(
+            "Failed to load tool {} from server {} due to error: {}",
+            tool_name, server_name, e
+          );
         }
       }
-      None => {
-        println!("No server is selected. Run `use` command to select a server.")
-      }
-    }
+    });
   }
 
   fn process_list_resources(&mut self) {
-    match &self.current_server {
-      Some(server_name) => {
-        let server_process = self.server_processes.get_mut(server_name).unwrap();
-        let resources = server_process.resources_list().unwrap();
-        for item in resources.iter() {
-          println!(" * {}", item.name);
-        }
+    self.process_with_current_server(|_, server_process| {
+      let resources = server_process.resources_list().unwrap();
+      for item in resources.iter() {
+        println!(" * {}", item.name);
       }
-      None => {
-        println!("No server is selected. Run `use` command to select a server.")
-      }
-    }
+    });
   }
 
   fn process_read_resources(&mut self, command_parts: &Vec<&str>) {
@@ -308,22 +284,16 @@ MCP server of `server_name` will be used as the current server."
       return;
     }
     let uri = command_parts[1];
-    match &self.current_server {
-      Some(server_name) => {
-        let server_process = self.server_processes.get_mut(server_name).unwrap();
-        match server_process.read_resources(uri) {
-          Ok(r) => {
-            println!("Result: \n{}\n", serde_json::to_string_pretty(&r).unwrap());
-          }
-          Err(e) => {
-            println!("Received error: {}", e);
-          }
+    self.process_with_current_server(|_, server_process| {
+      match server_process.read_resources(uri) {
+        Ok(r) => {
+          println!("Result: \n{}\n", serde_json::to_string_pretty(&r).unwrap());
+        }
+        Err(e) => {
+          println!("Received error: {}", e);
         }
       }
-      None => {
-        println!("No server is selected. Run `use` command to select a server.")
-      }
-    }
+    });
   }
 
   fn process_set_timeout(&mut self, command_parts: &Vec<&str>) {
@@ -338,14 +308,28 @@ MCP server of `server_name` will be used as the current server."
         return;
       }
     };
+
+    self.process_with_current_server(|server_name, server_process| {
+      server_process.set_timeout(timeout_ms);
+      println!(
+        "Timeout for MCP server {} has been set to {}ms",
+        server_name, timeout_ms
+      );
+    });
+  }
+
+  /**
+   * Process a closure with the current server process as the parameter.
+   * It will print out error message to ask users to select a server;
+   */
+  fn process_with_current_server<F>(&mut self, f: F)
+  where
+    F: Fn(&str, &mut MCPServerProcess),
+  {
     match &self.current_server {
       Some(server_name) => {
         let server_process = self.server_processes.get_mut(server_name).unwrap();
-        server_process.set_timeout(timeout_ms);
-        println!(
-          "Timeout for MCP server {} has been set to {}ms",
-          server_name, timeout_ms
-        );
+        f(&server_name, server_process);
       }
       None => {
         println!("No server is selected. Run `use` command to select a server.")
@@ -364,6 +348,7 @@ Command list of nah: \n\
 * call_tool:       Call a tool on the current server.\n\
 * list_resources:  List all resources on the current server\n\
 * read_resources:  Read resources with a URI\n\
+* set_timeout:     Set communication timeout for the current server\n\
 * exit:            Stop all server and exit nah."
   );
 }
