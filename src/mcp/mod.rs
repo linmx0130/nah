@@ -1,11 +1,12 @@
 /**
  * Data structure and utilities to handle Model Context Protocol.
  */
-
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::{mpsc::channel, Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 use std::{
   io::{BufRead, BufReader, Write},
   process::{Child, ChildStdin, ChildStdout, Command, Stdio},
@@ -13,10 +14,10 @@ use std::{
 
 use crate::types::NahError;
 
-mod request;
 mod notification;
-pub use request::MCPRequest;
+mod request;
 pub use notification::MCPNotification;
+pub use request::MCPRequest;
 
 /**
  * MCP Response is a JSON-RPC response.
@@ -80,7 +81,7 @@ pub struct MCPServerProcess {
   pub server_name: String,
   process: Child,
   stdin: ChildStdin,
-  stdout: BufReader<ChildStdout>,
+  stdout: Arc<Mutex<BufReader<ChildStdout>>>,
   tool_cache: HashMap<String, MCPToolDefinition>,
 }
 
@@ -111,7 +112,7 @@ impl MCPServerProcess {
       server_name: name.to_string(),
       process: server_process,
       stdin,
-      stdout: stdout_reader,
+      stdout: Arc::new(Mutex::new(stdout_reader)),
       tool_cache: HashMap::new(),
     };
 
@@ -158,9 +159,34 @@ impl MCPServerProcess {
   where
     T: serde::Deserialize<'b>,
   {
-    if self.stdout.read_line(buf).is_err() {
-      return Err(NahError::mcp_server_communication_error(&self.server_name));
+    let (tx, rx) = channel();
+    let stdout_thread = self.stdout.clone();
+    let server_name_copy = self.server_name.clone();
+
+    thread::spawn(move || {
+      let mut buf = String::new();
+      let mut stdout = stdout_thread.lock().unwrap();
+      if stdout.read_line(&mut buf).is_err() {
+        let _ = tx.send(Err(NahError::mcp_server_communication_error(
+          &server_name_copy,
+        )));
+        return;
+      }
+      let _ = tx.send(Ok(buf));
+    });
+
+    match rx.recv_timeout(Duration::from_secs(5)) {
+      Err(_) => {
+        return Err(NahError::mcp_server_timeout(&self.server_name));
+      }
+      Ok(result) => match result {
+        Ok(bstr) => *buf = bstr,
+        Err(e) => {
+          return Err(e);
+        }
+      },
     }
+
     let response_json = match buf.strip_suffix("\n") {
       Some(v) => v,
       None => buf,

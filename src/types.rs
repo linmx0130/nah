@@ -67,4 +67,11 @@ impl NahError {
       message: format!("Failed on running editor: {}", message),
     }
   }
+
+  pub fn mcp_server_timeout(server_name: &str) -> NahError {
+    NahError {
+      code: 9,
+      message: format!("Timeout when communicating with MCP server {}", server_name),
+    }
+  }
 }
