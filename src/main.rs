@@ -45,7 +45,7 @@ fn main() -> std::io::Result<()> {
   for (server_name, command) in data.iter() {
     println!("Launching server: {}", server_name);
 
-    let mut process = match MCPServerProcess::start_and_init(server_name, command) {
+    let process = match MCPServerProcess::start_and_init(server_name, command) {
       Err(e) => {
         println!(
           "Fatal error while launching {}, give up this server.",
@@ -110,6 +110,7 @@ impl AppContext {
           "call_tool" => self.process_call_tool(&command_parts),
           "list_resources" => self.process_list_resources(),
           "read_resources" => self.process_read_resources(&command_parts),
+          "set_timeout" => self.process_set_timeout(&command_parts),
           _ => {
             println!("Invalid command: {}", key);
           }
@@ -318,6 +319,33 @@ MCP server of `server_name` will be used as the current server."
             println!("Received error: {}", e);
           }
         }
+      }
+      None => {
+        println!("No server is selected. Run `use` command to select a server.")
+      }
+    }
+  }
+
+  fn process_set_timeout(&mut self, command_parts: &Vec<&str>) {
+    if command_parts.len() != 2 {
+      println!("Usage: set_timeout [timeout in milliseconds]");
+      return;
+    }
+    let timeout_ms: u64 = match command_parts[1].parse() {
+      Ok(t) => t,
+      Err(_) => {
+        println!("Timeout value must be an non-negative integer!");
+        return;
+      }
+    };
+    match &self.current_server {
+      Some(server_name) => {
+        let server_process = self.server_processes.get_mut(server_name).unwrap();
+        server_process.set_timeout(timeout_ms);
+        println!(
+          "Timeout for MCP server {} has been set to {}ms",
+          server_name, timeout_ms
+        );
       }
       None => {
         println!("No server is selected. Run `use` command to select a server.")

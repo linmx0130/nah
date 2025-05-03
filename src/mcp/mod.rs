@@ -83,6 +83,7 @@ pub struct MCPServerProcess {
   stdin: ChildStdin,
   stdout: Arc<Mutex<BufReader<ChildStdout>>>,
   tool_cache: HashMap<String, MCPToolDefinition>,
+  timeout_ms: u64,
 }
 
 impl MCPServerProcess {
@@ -114,6 +115,7 @@ impl MCPServerProcess {
       stdin,
       stdout: Arc::new(Mutex::new(stdout_reader)),
       tool_cache: HashMap::new(),
+      timeout_ms: 5000,
     };
 
     let initialize_request =
@@ -132,6 +134,16 @@ impl MCPServerProcess {
         .get("serverInfo")
     );
     Ok(result)
+  }
+
+  /**
+   * Set communication timeout.
+   *
+   * Args:
+   * * timeout_ms: timeout in milliseconds.
+   */
+  pub fn set_timeout(&mut self, timeout_ms: u64) {
+    self.timeout_ms = timeout_ms;
   }
 
   /**
@@ -175,7 +187,7 @@ impl MCPServerProcess {
       let _ = tx.send(Ok(buf));
     });
 
-    match rx.recv_timeout(Duration::from_secs(5)) {
+    match rx.recv_timeout(Duration::from_millis(self.timeout_ms)) {
       Err(_) => {
         return Err(NahError::mcp_server_timeout(&self.server_name));
       }
