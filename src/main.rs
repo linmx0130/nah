@@ -57,12 +57,6 @@ fn main() -> std::io::Result<()> {
       Ok(p) => p,
     };
 
-    let tools = process.fetch_tools().unwrap();
-
-    println!("Available tools:");
-    for item in tools.iter() {
-      println!(" - {}", item.name);
-    }
     context
       .server_processes
       .insert(server_name.to_owned(), process);
