@@ -49,7 +49,13 @@ fn create_instance_template_impl(schema: &Value, indent: usize) -> Result<Vec<St
           result.push(field_template[i].clone());
         }
       }
-      result.last_mut().unwrap().pop();
+      // Remove the extra comma in the end of last line to follow JSON format
+      result.last_mut().and_then(|line| {
+        if line.ends_with(",") {
+          line.pop();
+        };
+        Some(line)
+      });
       result.push(format!("{}}},", indent_string));
       Ok(result)
     }

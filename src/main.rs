@@ -153,7 +153,14 @@ MCP server of `server_name` will be used as the current server."
     match &self.current_server {
       Some(server_name) => {
         let server_process = self.server_processes.get_mut(server_name).unwrap();
-        let tools = server_process.fetch_tools().unwrap();
+        let tools = match server_process.fetch_tools() {
+          Ok(t) => t,
+          Err(e) => {
+            println!("Failed to fetch tool list: {}", e);
+            return;
+          }
+        };
+
         for item in tools.iter() {
           println!(" * {}", item.name);
         }
