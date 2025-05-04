@@ -241,9 +241,10 @@ MCP server of `server_name` will be used as the current server."
           let param_template = json_schema::create_instance_template(&def.input_schema);
           match param_template {
             Ok(template) => {
-              let temp_filename = format!(".nah_req.{}.args.json", tool_name);
+              let temp_filename = format!(".nah_req.{}.args.js", tool_name);
               match File::create(&temp_filename).and_then(|file: File| {
                           let mut file = file;
+                          file.write_all("// Please fill arguments for tool call here in JSON format. \n// Lines starts with '//' will be removed\n".as_bytes())?;
                           file.write_all(template.as_bytes())?;
                           file.flush()?;
                           Ok(())
@@ -262,7 +263,11 @@ MCP server of `server_name` will be used as the current server."
                                   println!("Failed to load the argument file. Call tool operation is interrupted.");
                                   return;
                               }
-                              match serde_json::from_str::<Value>(&buf) {
+                              let mut arg_json_buf = String::new();
+                              buf.split('\n').filter(|l| !l.trim().starts_with("//")).for_each(|l| {
+                                arg_json_buf.push_str(l);
+                              });
+                              match serde_json::from_str::<Value>(&arg_json_buf) {
                                   Err(_) => {
                                       println!("Provided argument is invalid in JSON Format. Call tool operation is interrupted.");
                                   }
