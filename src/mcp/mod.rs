@@ -55,7 +55,9 @@ pub struct MCPToolDefinition {
  */
 #[derive(Debug, Deserialize, Clone)]
 pub struct MCPResourceDefinition {
-  pub uri: String,
+  pub uri: Option<String>,
+  #[serde(rename = "uriTemplate")]
+  pub uri_template: Option<String>,
   pub name: String,
   pub description: Option<String>,
   #[serde(rename = "mimeType")]
@@ -375,6 +377,34 @@ impl MCPServerProcess {
         for item in &result {
           self.resource_cache.insert(item.name.clone(), item.clone());
         }
+        Ok(result)
+      }
+      None => Err(self.parse_response_error(&response)),
+    }
+  }
+
+  pub fn fetch_resource_templates_list(&mut self) -> Result<Vec<MCPResourceDefinition>, NahError> {
+    let id: String = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::resource_templates_list(&id);
+    let response = self.send_and_wait_for_response(request)?;
+    match response.result {
+      Some(res) => {
+        let resources = res
+          .as_object()
+          .and_then(|obj| obj.get("resourceTemplates"))
+          .and_then(|v: &Value| v.as_array());
+        if resources.is_none() {
+          return Err(NahError::mcp_server_invalid_response(&self.server_name));
+        }
+        let result: Vec<MCPResourceDefinition> = resources
+          .unwrap()
+          .iter()
+          .map(|v| serde_json::from_value::<MCPResourceDefinition>(v.clone()))
+          .filter_map(|r| match r {
+            Ok(v) => Some(v),
+            Err(_) => None,
+          })
+          .collect();
         Ok(result)
       }
       None => Err(self.parse_response_error(&response)),

@@ -74,6 +74,18 @@ impl MCPRequest {
   }
 
   /**
+   * Request to fetch the list of available resource templates from `resources/templates/list`
+   */
+  pub fn resource_templates_list(id: &str) -> Self {
+    MCPRequest {
+      jsonrpc: "2.0".to_string(),
+      method: "resources/templates/list".to_owned(),
+      id: id.to_string(),
+      params: None,
+    }
+  }
+
+  /**
    * Request to read a resource.
    */
   pub fn resources_read(id: &str, uri: &str) -> Self {

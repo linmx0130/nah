@@ -272,9 +272,15 @@ MCP server of `server_name` will be used as the current server."
 
   fn process_list_resources(&mut self) {
     self.process_with_current_server(|_, server_process| {
+      println!("Direct resources");
       let resources = server_process.fetch_resources_list().unwrap();
       for item in resources.iter() {
-        println!(" * {}", item.name);
+        println!(" * {}", item.uri.as_ref().unwrap());
+      }
+      println!("Resource templates");
+      let resources = server_process.fetch_resource_templates_list().unwrap();
+      for item in resources.iter() {
+        println!(" * {}", item.uri_template.as_ref().unwrap());
       }
     });
   }
@@ -289,7 +295,7 @@ MCP server of `server_name` will be used as the current server."
       match server_process.get_resources_definition(uri) {
         Ok(r) => {
           println!("Name: {}", r.name);
-          println!("URI: {}", r.uri);
+          println!("URI: {}", uri);
           let _ = r.size.as_ref().is_some_and(|v| {
             println!("Size: {}", v);
             true
