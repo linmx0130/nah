@@ -4,6 +4,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::path::PathBuf;
 use std::sync::{mpsc::channel, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -81,6 +83,7 @@ pub struct MCPResourceContent {
  */
 pub struct MCPServerProcess {
   pub server_name: String,
+  history_file: File,
   process: Child,
   stdin: ChildStdin,
   stdout: Arc<Mutex<BufReader<ChildStdout>>>,
@@ -93,14 +96,50 @@ impl MCPServerProcess {
   /**
    * Start and initialize a MCP Server.
    */
-  pub fn start_and_init(name: &str, mcp_command: &MCPServerCommand) -> Result<Self, NahError> {
+  pub fn start_and_init(
+    name: &str,
+    mcp_command: &MCPServerCommand,
+    history_path: &PathBuf,
+  ) -> Result<Self, NahError> {
     let mut server_command = Command::new(&mcp_command.command);
     for arg in mcp_command.args.iter() {
       server_command.arg(&arg);
     }
     server_command.stdin(Stdio::piped());
     server_command.stdout(Stdio::piped());
-    server_command.stderr(Stdio::null());
+
+    let mut history_file_path = history_path.clone();
+    history_file_path.push(format!("{}.jsonl", name));
+    let history_file = match OpenOptions::new()
+      .write(true)
+      .create(true)
+      .open(history_file_path.as_path())
+    {
+      Ok(f) => f,
+      Err(_) => {
+        return Err(NahError::io_error(&format!(
+          "Failed to create history file: {}",
+          history_file_path.display()
+        )));
+      }
+    };
+    let mut stderr_file_path = history_path.clone();
+    stderr_file_path.push(format!("{}.stderr", name));
+    let stderr_file = match OpenOptions::new()
+      .write(true)
+      .create(true)
+      .open(stderr_file_path.as_path())
+    {
+      Ok(f) => f,
+      Err(_) => {
+        return Err(NahError::io_error(&format!(
+          "Failed to create stderr file: {}",
+          stderr_file_path.display()
+        )));
+      }
+    };
+    server_command.stderr(Stdio::from(stderr_file));
+
     let mut server_process = match server_command.spawn() {
       Ok(p) => p,
       Err(_e) => {
@@ -111,7 +150,6 @@ impl MCPServerProcess {
     let stdin = server_process.stdin.take().unwrap();
     let stdout = server_process.stdout.take().unwrap();
     let stdout_reader = BufReader::new(stdout);
-
     let mut result = MCPServerProcess {
       server_name: name.to_string(),
       process: server_process,
@@ -120,6 +158,7 @@ impl MCPServerProcess {
       tool_cache: HashMap::new(),
       resource_cache: HashMap::new(),
       timeout_ms: 5000,
+      history_file,
     };
 
     let initialize_request =
@@ -159,6 +198,7 @@ impl MCPServerProcess {
   {
     let mut data = serde_json::to_string(&request).unwrap();
     data.push_str("\n");
+    let _ = self.history_file.write(data.as_bytes());
     if self.stdin.write_all(&data.as_bytes()).is_err() {
       return Err(NahError::mcp_server_communication_error(&self.server_name));
     }
@@ -202,6 +242,7 @@ impl MCPServerProcess {
         }
       },
     }
+    let _ = self.history_file.write(buf.as_bytes());
 
     let response_json = match buf.strip_suffix("\n") {
       Some(v) => v,
@@ -266,6 +307,7 @@ impl MCPServerProcess {
    * Kill the process.
    */
   pub fn kill(&mut self) -> std::io::Result<()> {
+    self.history_file.flush();
     self.process.kill()
   }
 

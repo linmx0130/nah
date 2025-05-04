@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::time::SystemTime;
 use types::NahError;
 
 /// Read some lines of a file
@@ -18,6 +19,9 @@ use types::NahError;
 struct Cli {
   /// JSON config file that declares the `mcpServers` field.
   mcp_config_file: PathBuf,
+  /// Path to store history records.
+  #[arg(long, value_name = "PATH")]
+  history_path: Option<PathBuf>,
 }
 
 /**
@@ -26,6 +30,7 @@ struct Cli {
 struct AppContext {
   pub server_processes: HashMap<String, MCPServerProcess>,
   pub current_server: Option<String>,
+  pub history_path: PathBuf,
 }
 
 fn main() -> std::io::Result<()> {
@@ -36,26 +41,47 @@ fn main() -> std::io::Result<()> {
   for server in data.keys() {
     println!(" - {}", server);
   }
+  let timestamp = std::time::SystemTime::now()
+    .duration_since(SystemTime::UNIX_EPOCH)
+    .unwrap()
+    .as_secs();
+  let history_path = match args.history_path {
+    None => PathBuf::from(format!("nah_{}", timestamp)),
+    Some(p) => p.clone(),
+  };
+  if std::fs::create_dir(history_path.clone()).is_err() {
+    println!(
+      "Failed to create history folder: {}",
+      history_path.display()
+    );
+  } else {
+    println!(
+      "Nah communication history folder: {}",
+      history_path.display()
+    );
+  }
 
   let mut context = AppContext {
     server_processes: HashMap::new(),
     current_server: None,
+    history_path,
   };
 
   for (server_name, command) in data.iter() {
     println!("Launching server: {}", server_name);
 
-    let process = match MCPServerProcess::start_and_init(server_name, command) {
-      Err(e) => {
-        println!(
-          "Fatal error while launching {}, give up this server.",
-          server_name
-        );
-        println!("Error: {}", e);
-        continue;
-      }
-      Ok(p) => p,
-    };
+    let process =
+      match MCPServerProcess::start_and_init(server_name, command, &context.history_path) {
+        Err(e) => {
+          println!(
+            "Fatal error while launching {}, give up this server.",
+            server_name
+          );
+          println!("Error: {}", e);
+          continue;
+        }
+        Ok(p) => p,
+      };
 
     context
       .server_processes
