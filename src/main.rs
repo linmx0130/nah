@@ -33,10 +33,16 @@ struct AppContext {
   pub history_path: PathBuf,
 }
 
-fn main() -> std::io::Result<()> {
+fn main() {
   let args = Cli::parse();
   println!("Config file: {:?}", args.mcp_config_file);
-  let data = load_mcp_servers_config(args.mcp_config_file).unwrap();
+  let data = match load_mcp_servers_config(args.mcp_config_file) {
+    Ok(d) => d,
+    Err(e) => {
+      println!("{}", e);
+      return;
+    }
+  };
   println!("Found servers:");
   for server in data.keys() {
     println!(" - {}", server);
@@ -54,6 +60,7 @@ fn main() -> std::io::Result<()> {
       "Failed to create history folder: {}",
       history_path.display()
     );
+    return;
   } else {
     println!(
       "Nah communication history folder: {}",
@@ -112,7 +119,6 @@ fn main() -> std::io::Result<()> {
     }
   }
   context.process_exit();
-  Ok(())
 }
 
 impl AppContext {
@@ -299,15 +305,28 @@ MCP server of `server_name` will be used as the current server."
   fn process_list_resources(&mut self) {
     self.process_with_current_server(|_, server_process| {
       println!("Direct resources");
-      let resources = server_process.fetch_resources_list().unwrap();
-      for item in resources.iter() {
-        println!(" * {}", item.uri.as_ref().unwrap());
-      }
+      match server_process.fetch_resources_list() {
+        Ok(r) => {
+          for item in r.iter() {
+            println!(" * {}", item.uri.as_ref().unwrap());
+          }
+        }
+        Err(e) => {
+          println!("Failed to load resource list: {}", e);
+        }
+      };
+
       println!("Resource templates");
-      let resources = server_process.fetch_resource_templates_list().unwrap();
-      for item in resources.iter() {
-        println!(" * {}", item.uri_template.as_ref().unwrap());
-      }
+      match server_process.fetch_resource_templates_list() {
+        Ok(r) => {
+          for item in r.iter() {
+            println!(" * {}", item.uri_template.as_ref().unwrap());
+          }
+        }
+        Err(e) => {
+          println!("Failed to load resource templates: {}", e);
+        }
+      };
     });
   }
 

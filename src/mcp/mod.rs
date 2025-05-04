@@ -307,7 +307,7 @@ impl MCPServerProcess {
    * Kill the process.
    */
   pub fn kill(&mut self) -> std::io::Result<()> {
-    self.history_file.flush();
+    let _ = self.history_file.flush();
     self.process.kill()
   }
 
