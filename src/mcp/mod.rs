@@ -79,6 +79,26 @@ pub struct MCPResourceContent {
 }
 
 /**
+ * Describe a MCP prompt.
+ */
+#[derive(Debug, Deserialize)]
+pub struct MCPPromptDefinition {
+  pub name: String,
+  pub description: Option<String>,
+  pub arguments: Option<Vec<MCPPromptArgument>>,
+}
+
+/**
+ * Describe an argument that a prompt can accept.
+ */
+#[derive(Debug, Deserialize)]
+pub struct MCPPromptArgument {
+  pub name: String,
+  pub description: Option<String>,
+  pub required: Option<bool>,
+}
+
+/**
  * Wrapper of a MCP server process.
  */
 pub struct MCPServerProcess {
@@ -89,6 +109,7 @@ pub struct MCPServerProcess {
   stdout: Arc<Mutex<BufReader<ChildStdout>>>,
   tool_cache: HashMap<String, MCPToolDefinition>,
   resource_cache: HashMap<String, MCPResourceDefinition>,
+  prompt_cache: HashMap<String, MCPPromptDefinition>,
   timeout_ms: u64,
 }
 
@@ -157,6 +178,7 @@ impl MCPServerProcess {
       stdout: Arc::new(Mutex::new(stdout_reader)),
       tool_cache: HashMap::new(),
       resource_cache: HashMap::new(),
+      prompt_cache: HashMap::new(),
       timeout_ms: 5000,
       history_file,
     };
@@ -502,6 +524,50 @@ impl MCPServerProcess {
         })
         .collect(),
     )
+  }
+
+  /**
+   * Fetch the list of promptss from the MCP Server.
+   */
+  pub fn fetch_prompts_list(&mut self) -> Result<Vec<&MCPPromptDefinition>, NahError> {
+    let id: String = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::prompts_list(&id);
+    let response = self.send_and_wait_for_response(request)?;
+
+    let result = match response.result {
+      None => {
+        return Err(match response.error {
+          None => NahError::mcp_server_communication_error(&self.server_name),
+          Some(err) => NahError::mcp_server_error(
+            &self.server_name,
+            &serde_json::to_string_pretty(&err).unwrap(),
+          ),
+        });
+      }
+      Some(res) => {
+        let prompts = match res
+          .as_object()
+          .and_then(|v| v.get("prompts"))
+          .and_then(|v| v.as_array())
+        {
+          None => {
+            return Err(NahError::mcp_server_invalid_response(&self.server_name));
+          }
+          Some(t) => t,
+        };
+
+        self.prompt_cache.clear();
+        prompts.iter().for_each(|item| {
+          let _ = serde_json::from_value::<MCPPromptDefinition>(item.clone()).is_ok_and(|v| {
+            self.prompt_cache.insert(v.name.clone(), v);
+            true
+          });
+        });
+
+        self.prompt_cache.values().collect()
+      }
+    };
+    Ok(result)
   }
 
   fn parse_response_error(&self, response: &MCPResponse) -> NahError {

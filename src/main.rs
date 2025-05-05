@@ -143,6 +143,7 @@ impl AppContext {
           "list_resources" => self.process_list_resources(),
           "inspect_resources" => self.process_inspect_resources(&command_parts),
           "read_resources" => self.process_read_resources(&command_parts),
+          "list_prompts" => self.process_list_prompts(),
           "set_timeout" => self.process_set_timeout(&command_parts),
           _ => {
             println!("Invalid command: {}", key);
@@ -386,6 +387,21 @@ MCP server of `server_name` will be used as the current server."
     });
   }
 
+  fn process_list_prompts(&mut self) {
+    self.process_with_current_server(|_, server_process| {
+      match server_process.fetch_prompts_list() {
+        Ok(r) => {
+          for item in r.iter() {
+            println!("* {}", item.name);
+          }
+        }
+        Err(e) => {
+          println!("Failed to load prompt list: {}", e);
+        }
+      }
+    });
+  }
+
   fn process_set_timeout(&mut self, command_parts: &Vec<&str>) {
     if command_parts.len() != 2 {
       println!("Usage: set_timeout [timeout in milliseconds]");
@@ -439,6 +455,7 @@ Command list of nah: \n\
 * list_resources:    List all resources on the current server\n\
 * inspect_resources: Inspect detailed  info of a resource \n\
 * read_resources:    Read resources with a URI\n\
+* list_prompts:      List all prompts on the current server.\n\
 * set_timeout:       Set communication timeout for the current server\n\
 * exit:              Stop all server and exit nah."
   );

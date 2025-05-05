@@ -99,4 +99,16 @@ impl MCPRequest {
       })),
     }
   }
+
+  /**
+   * Request to fetch available prompts.
+   */
+  pub fn prompts_list(id: &str) -> Self {
+    MCPRequest {
+      jsonrpc: "2.0".to_string(),
+      method: "prompts/list".to_owned(),
+      id: id.to_owned(),
+      params: None,
+    }
+  }
 }
