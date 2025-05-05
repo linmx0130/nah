@@ -570,6 +570,27 @@ impl MCPServerProcess {
     Ok(result)
   }
 
+  /**
+   * Get the definition of a given prompt name. It may try to read the prompt from cached results.
+   */
+  pub fn get_prompt_definition(
+    &mut self,
+    prompt_name: &str,
+  ) -> Result<&MCPPromptDefinition, NahError> {
+    if self.prompt_cache.contains_key(prompt_name) {
+      Ok(self.prompt_cache.get(prompt_name).unwrap())
+    } else {
+      // re-fetch tool list
+      self.fetch_prompts_list()?;
+      match self.prompt_cache.get(prompt_name) {
+        Some(p) => Ok(p),
+        None => Err(NahError::invalid_value(&format!(
+          "Invalid prompt name: {}",
+          prompt_name
+        ))),
+      }
+    }
+  }
   fn parse_response_error(&self, response: &MCPResponse) -> NahError {
     match &response.error {
       Some(e) => NahError::mcp_server_error(&self.server_name, &serde_json::to_string(e).unwrap()),

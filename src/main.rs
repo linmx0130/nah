@@ -144,6 +144,7 @@ impl AppContext {
           "inspect_resources" => self.process_inspect_resources(&command_parts),
           "read_resources" => self.process_read_resources(&command_parts),
           "list_prompts" => self.process_list_prompts(),
+          "inspect_prompt" => self.process_inspect_prompt(&command_parts),
           "set_timeout" => self.process_set_timeout(&command_parts),
           _ => {
             println!("Invalid command: {}", key);
@@ -402,6 +403,47 @@ MCP server of `server_name` will be used as the current server."
     });
   }
 
+  fn process_inspect_prompt(&mut self, command_parts: &Vec<&str>) {
+    if command_parts.len() != 2 {
+      println!("Usage: inspect_prompt [Prompt name]");
+      return;
+    }
+    let prompt_name = command_parts[1];
+    self.process_with_current_server(|_, server_process| {
+      match server_process.get_prompt_definition(prompt_name) {
+        Ok(p) => {
+          println!("Name: {}", p.name);
+          let _ = p.description.as_ref().is_some_and(|desc| {
+            println!("Description:\n  {}", desc);
+            true
+          });
+          let _ = p.arguments.as_ref().is_some_and(|args| {
+            if args.len() == 0 {
+              false
+            } else {
+              println!("Args:");
+              for arg in args.iter() {
+                let mut desc = String::new();
+                if arg.required.is_some_and(|v| v) {
+                  desc.push_str("[REQUIRED] ");
+                }
+                let _ = arg.description.as_ref().is_some_and(|v| {
+                  desc.push_str(v);
+                  true
+                });
+                println!("  {}: {}", arg.name, desc);
+              }
+              true
+            }
+          });
+        }
+        Err(e) => {
+          println!("Failed to load prompt {}: {}", prompt_name, e);
+        }
+      }
+    });
+  }
+
   fn process_set_timeout(&mut self, command_parts: &Vec<&str>) {
     if command_parts.len() != 2 {
       println!("Usage: set_timeout [timeout in milliseconds]");
@@ -456,6 +498,7 @@ Command list of nah: \n\
 * inspect_resources: Inspect detailed  info of a resource \n\
 * read_resources:    Read resources with a URI\n\
 * list_prompts:      List all prompts on the current server.\n\
+* inspect_prompt:    Inspect detailed in of a prompt.\n\
 * set_timeout:       Set communication timeout for the current server\n\
 * exit:              Stop all server and exit nah."
   );
