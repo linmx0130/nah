@@ -145,6 +145,7 @@ impl AppContext {
           "read_resources" => self.process_read_resources(&command_parts),
           "list_prompts" => self.process_list_prompts(),
           "inspect_prompt" => self.process_inspect_prompt(&command_parts),
+          "get_prompt" => self.process_get_prompt(&command_parts),
           "set_timeout" => self.process_set_timeout(&command_parts),
           _ => {
             println!("Invalid command: {}", key);
@@ -259,31 +260,21 @@ MCP server of `server_name` will be used as the current server."
                                   println!("{}", launch_editor_outcome.unwrap_err());
                                   return;
                               }
-                              let mut buf = String::new();
-                              let mut file = File::open(&temp_filename).unwrap();
-                              if file.read_to_string(&mut buf).is_err() {
-                                  println!("Failed to load the argument file. Call tool operation is interrupted.");
+                              let arguments= match load_json_arguments(&temp_filename) {
+                                Err(e) => {
+                                  println!("{}", e);
                                   return;
-                              }
-                              let mut arg_json_buf = String::new();
-                              buf.split('\n').filter(|l| !l.trim().starts_with("//")).for_each(|l| {
-                                arg_json_buf.push_str(l);
-                              });
-                              match serde_json::from_str::<Value>(&arg_json_buf) {
-                                  Err(_) => {
-                                      println!("Provided argument is invalid in JSON Format. Call tool operation is interrupted.");
-                                  }
-                                  Ok(params) => {
-                                      let result = server_process.call_tool(tool_name, &params);
-                                      match result {
-                                          Err(e) => {
-                                              println!("Received error: {}", e);
-                                          }
-                                          Ok(result) => {
-                                              println!("Result: \n{}\n", serde_json::to_string_pretty(&result).unwrap());
-                                          }
-                                      }
-                                  }
+                                },
+                                Ok(v) => v
+                              };
+                              let result = server_process.call_tool(tool_name, &arguments);
+                              match result {
+                                Err(e) => {
+                                  println!("Received error: {}", e);
+                                }
+                                Ok(result) => {
+                                  println!("Result: \n{}\n", serde_json::to_string_pretty(&result).unwrap());
+                                }
                               }
                               if std::fs::remove_file(&temp_filename).is_err() {
                                   println!("Failed to clean up the temporary argument file.")
@@ -444,6 +435,89 @@ MCP server of `server_name` will be used as the current server."
     });
   }
 
+  fn process_get_prompt(&mut self, command_parts: &Vec<&str>) {
+    if command_parts.len() != 2 {
+      println!("Usage: get_prompt [Prompt name]");
+      return;
+    }
+    let prompt_name = command_parts[1];
+    self.process_with_current_server(|_, server_process| {
+      let prompt_def = server_process.get_prompt_definition(prompt_name);
+      match prompt_def {
+        Ok(def) => {
+          match &def.arguments {
+            Some(args) => {
+              if args.len() > 0 {
+                let temp_filename = format!(".nah_req.{}.args.js", prompt_name);
+                let template_lines: Vec<String> = args.iter().map(|arg| format!("    \"{}\": \"<FILL ARGUMENT HERE>\"", arg.name)).collect();
+                let write_template_result = File::create(&temp_filename).and_then(|file| {
+                  let mut file = file;
+                  file.write_all(b"// Please fill arguments for prompt call here in JSON format \n// Lines starts with '//' will be removed\n")?;
+                  file.write_all(b"{\n")?;
+                  for (idx, line) in template_lines.iter().enumerate() {
+                    file.write_all(line.as_bytes())?;
+                    if idx + 1 != template_lines.len() {
+                      file.write_all(b",\n")?;
+                    } else {
+                      file.write_all(b"\n")?;
+                    }
+                  }
+                  file.write_all(b"}\n")?;
+                  Ok(())
+                });
+                if write_template_result.is_err() {
+                  println!("Failed to prepare the argument template file for getting prompt {} due to error {}", prompt_name, write_template_result.err().unwrap());
+                  return;
+                }
+                // load parameter and call tool
+                let launch_editor_outcome = launch_editor(&temp_filename);
+                if launch_editor_outcome.is_err() {
+                  println!("{}", launch_editor_outcome.unwrap_err());
+                  return;
+                }
+                let argument_value = load_json_arguments(&temp_filename);
+                let arguments= match argument_value.and_then(|v| match v.as_object() {
+                  Some(v) => Ok(v.clone()),
+                  None => Err(NahError::invalid_argument_error("Arguments should be a JSON Object!"))
+                }) {
+                  Err(e) => {
+                    println!("{}", e);
+                    return;
+                  },
+                  Ok(v) => v
+                };
+                let args_iter = arguments.iter().map(|(k, v)| {
+                  (k.as_str(), v.as_str().unwrap_or(""))
+                });
+                let result = server_process.get_prompt_content(prompt_name, args_iter);
+                match result {
+                  Err(e) => {
+                    println!("Received error: {}", e);
+                  }
+                  Ok(result) => {
+                    println!("Result: \n{}\n", serde_json::to_string_pretty(&result).unwrap());
+                  }
+                };
+                if std::fs::remove_file(&temp_filename).is_err() {
+                  println!("Failed to clean up the temporary argument file.")
+                }
+              } else {
+                println!("Prompt {} doesn't need arguments.", prompt_name);
+              }
+            },
+            None => {
+              println!("Prompt {} doesn't need arguments.", prompt_name);
+            }
+          };
+
+        }
+        Err(e) => {
+          println!("Failed to prepare argument template for getting prompt {} due to error: {}", prompt_name, e);
+        }
+      }
+    });
+  }
+
   fn process_set_timeout(&mut self, command_parts: &Vec<&str>) {
     if command_parts.len() != 2 {
       println!("Usage: set_timeout [timeout in milliseconds]");
@@ -495,10 +569,11 @@ Command list of nah: \n\
 * inspect_tool:      Inspect detailed info of a tool.\n\
 * call_tool:         Call a tool on the current server.\n\
 * list_resources:    List all resources on the current server\n\
-* inspect_resources: Inspect detailed  info of a resource \n\
+* inspect_resources: Inspect detailed info of a resource \n\
 * read_resources:    Read resources with a URI\n\
 * list_prompts:      List all prompts on the current server.\n\
 * inspect_prompt:    Inspect detailed in of a prompt.\n\
+* get_prompt:        Get a prompt from current server.\n\
 * set_timeout:       Set communication timeout for the current server\n\
 * exit:              Stop all server and exit nah."
   );
@@ -523,5 +598,30 @@ fn launch_editor(filename: &str) -> Result<(), NahError> {
       }
     }
     Err(e) => Err(NahError::editor_error(&format!("{}", e))),
+  }
+}
+
+fn load_json_arguments(filename: &str) -> Result<Value, NahError> {
+  let mut buf = String::new();
+  let mut file = File::open(&filename).unwrap();
+  if file.read_to_string(&mut buf).is_err() {
+    return Err(NahError::invalid_argument_error(
+      "failed to open the argument file.",
+    ));
+  }
+  let mut arg_json_buf = String::new();
+  buf
+    .split('\n')
+    .filter(|l| !l.trim().starts_with("//"))
+    .for_each(|l| {
+      arg_json_buf.push_str(l);
+    });
+  match serde_json::from_str::<Value>(&arg_json_buf) {
+    Err(_) => {
+      return Err(NahError::invalid_argument_error(
+        "Provided argument is invalid in JSON Format",
+      ));
+    }
+    Ok(args) => Ok(args),
   }
 }

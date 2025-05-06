@@ -74,4 +74,11 @@ impl NahError {
       message: format!("Timeout when communicating with MCP server {}", server_name),
     }
   }
+
+  pub fn invalid_argument_error(message: &str) -> NahError {
+    NahError {
+      code: 10,
+      message: format!("Failed to load arguments: {}", message),
+    }
+  }
 }

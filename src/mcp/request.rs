@@ -111,4 +111,26 @@ impl MCPRequest {
       params: None,
     }
   }
+
+  /**
+   * Requeset to retrieve a prompt.
+   */
+  pub fn get_prompt<'a, I>(id: &str, prompt_name: &str, args: I) -> Self
+  where
+    I: Iterator<Item = (&'a str, &'a str)>,
+  {
+    let mut arguments = serde_json::Map::new();
+    for (key, value) in args {
+      arguments.insert(key.to_owned(), Value::String(value.to_owned()));
+    }
+    MCPRequest {
+      jsonrpc: "2.0".to_string(),
+      method: "prompts/get".to_owned(),
+      id: id.to_owned(),
+      params: Some(json!({
+        "name": Value::String(prompt_name.to_owned()),
+        "arguments": if arguments.len() > 0 { Some(Value::Object(arguments))} else {None}
+      })),
+    }
+  }
 }

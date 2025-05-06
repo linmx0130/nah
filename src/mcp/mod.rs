@@ -99,6 +99,36 @@ pub struct MCPPromptArgument {
 }
 
 /**
+ * Describe a prompt message content. It could be text, image, audio or other supported data.
+ */
+#[derive(Debug, Deserialize, Serialize)]
+pub struct PromptMessageContent {
+  #[serde(rename = "type")]
+  pub type_: String,
+  pub text: Option<String>,
+  pub data: Option<String>,
+  #[serde(rename = "mimeType")]
+  pub mime_type: Option<String>,
+  pub resource: Option<Value>,
+  pub annotations: Option<Value>,
+}
+
+/**
+ * Describes a prompt message.
+ */
+#[derive(Debug, Deserialize, Serialize)]
+pub struct PromptMessage {
+  pub role: String,
+  pub content: PromptMessageContent,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct MCPPromptResult {
+  pub description: Option<String>,
+  pub messages: Vec<PromptMessage>,
+}
+
+/**
  * Wrapper of a MCP server process.
  */
 pub struct MCPServerProcess {
@@ -591,6 +621,28 @@ impl MCPServerProcess {
       }
     }
   }
+
+  /**
+   * Get the prompt content through a given prompt name and arguments.
+   */
+  pub fn get_prompt_content<'a, I>(
+    &mut self,
+    prompt_name: &str,
+    args: I,
+  ) -> Result<MCPPromptResult, NahError>
+  where
+    I: Iterator<Item = (&'a str, &'a str)>,
+  {
+    let id: String = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::get_prompt(&id, prompt_name, args);
+    let response = self.send_and_wait_for_response(request)?;
+
+    match response.result {
+      Some(r) => Ok(serde_json::from_value::<MCPPromptResult>(r).unwrap()),
+      None => Err(self.parse_response_error(&response)),
+    }
+  }
+
   fn parse_response_error(&self, response: &MCPResponse) -> NahError {
     match &response.error {
       Some(e) => NahError::mcp_server_error(&self.server_name, &serde_json::to_string(e).unwrap()),
