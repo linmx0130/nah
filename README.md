@@ -25,5 +25,12 @@ $ nah ~/mcp/config.json --history-path trial_1_history
 # History will be stored as trial_1_history/[server name].jsonl
 ```
 
+## Configuration
+By deault, users are asked to provide arguments for tool calls through editing a file in `vi`. Environment variable `$EDITOR` controls the editor to use:
+```bash
+$ EDITOR=nano nah ~/mcp/config.json
+# nano will be used as the editor
+```
+
 ## Copyright
 Copyright (c) 2025 Mengxiao Lin. Released under MIT License. Check [LICENSE](./LICENSE) file for more details.
