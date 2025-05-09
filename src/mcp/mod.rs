@@ -162,8 +162,8 @@ impl MCPServerProcess {
     let mut history_file_path = history_path.clone();
     history_file_path.push(format!("{}.jsonl", name));
     let history_file = match OpenOptions::new()
-      .write(true)
       .create(true)
+      .append(true)
       .open(history_file_path.as_path())
     {
       Ok(f) => f,
@@ -177,8 +177,8 @@ impl MCPServerProcess {
     let mut stderr_file_path = history_path.clone();
     stderr_file_path.push(format!("{}.stderr", name));
     let stderr_file = match OpenOptions::new()
-      .write(true)
       .create(true)
+      .append(true)
       .open(stderr_file_path.as_path())
     {
       Ok(f) => f,
@@ -361,6 +361,11 @@ impl MCPServerProcess {
   pub fn kill(&mut self) -> std::io::Result<()> {
     let _ = self.history_file.flush();
     self.process.kill()
+  }
+
+  pub fn kill_and_wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+    let _ = self.kill()?;
+    self.process.wait()
   }
 
   /**

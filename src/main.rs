@@ -5,7 +5,7 @@ mod types;
 
 use clap::Parser;
 use config::load_mcp_servers_config;
-use mcp::MCPServerProcess;
+use mcp::{MCPServerCommand, MCPServerProcess};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::File;
@@ -31,6 +31,7 @@ struct AppContext {
   pub server_processes: HashMap<String, MCPServerProcess>,
   pub current_server: Option<String>,
   pub history_path: PathBuf,
+  pub server_commands: HashMap<String, MCPServerCommand>,
 }
 
 fn main() {
@@ -72,9 +73,10 @@ fn main() {
     server_processes: HashMap::new(),
     current_server: None,
     history_path,
+    server_commands: data,
   };
 
-  for (server_name, command) in data.iter() {
+  for (server_name, command) in context.server_commands.iter() {
     println!("Launching server: {}", server_name);
 
     let process =
@@ -137,6 +139,8 @@ impl AppContext {
           "help" => print_help(),
           "use" => self.process_use(&command_parts),
           "exit" => self.process_exit(),
+          "list_servers" => self.process_list_servers(),
+          "restart_server" => self.process_restart_server(&command_parts),
           "list_tools" => self.process_list_tools(),
           "inspect_tool" => self.process_inspect_tool(&command_parts),
           "call_tool" => self.process_call_tool(&command_parts),
@@ -184,6 +188,59 @@ MCP server of `server_name` will be used as the current server."
       }
     });
     std::process::exit(0);
+  }
+
+  fn process_list_servers(&mut self) {
+    self.server_processes.iter().for_each(|(name, _)| {
+      println!("* {}", name);
+    });
+  }
+
+  fn process_restart_server(&mut self, command_parts: &Vec<&str>) {
+    let help_message = "Usage of use:\n\
+    >> restart_server [server_name] \n\
+MCP server of `server_name` will be restarted. If no `server_name` is provided, current server will be restarted.";
+    if command_parts.len() > 2 {
+      println!("{}", help_message);
+      return;
+    }
+    let server_name = match command_parts.get(1) {
+      Some(s) => *s,
+      None => match &self.current_server {
+        Some(s) => s,
+        None => {
+          println!("No current server is selected!");
+          println!("{}", help_message);
+          return;
+        }
+      },
+    };
+
+    let command = match self.server_commands.get(server_name) {
+      Some(p) => p,
+      None => {
+        println!("MCP Server {} not found!", server_name);
+        return;
+      }
+    };
+
+    let process = match MCPServerProcess::start_and_init(server_name, command, &self.history_path) {
+      Err(e) => {
+        println!(
+          "Fatal error while launching {}, give up this server.",
+          server_name
+        );
+        println!("Error: {}", e);
+        return;
+      }
+      Ok(p) => p,
+    };
+
+    let old_process = self
+      .server_processes
+      .insert(server_name.to_owned(), process);
+
+    let _ = old_process.is_some_and(|mut p| p.kill_and_wait().is_ok());
   }
 
   fn process_list_tools(&mut self) {
@@ -569,6 +626,8 @@ fn print_help() {
     "\
 Command list of nah: \n\
 * use:               Select a MCP server to interactive with. \n\
+* list_servers:      List all available MCP servers. \n\
+* restart_server:    Restart a MCP server. \n\
 * list_tools:        List all tools on the current server.\n\
 * inspect_tool:      Inspect detailed info of a tool.\n\
 * call_tool:         Call a tool on the current server.\n\
