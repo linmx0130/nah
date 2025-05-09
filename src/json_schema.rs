@@ -62,6 +62,14 @@ fn create_instance_template_impl(schema: &Value, indent: usize) -> Result<Vec<St
   }
 }
 
+/// Return true if the argument is an empty JSON object.
+pub fn is_empty_object(value: &Value) -> bool {
+  value
+    .as_object()
+    .and_then(|obj| if obj.len() == 0 { Some(()) } else { None })
+    .is_some()
+}
+
 /**
  * Get type of a JSON Schema
  */
@@ -105,4 +113,17 @@ fn get_properties(schema: &Value) -> Result<Vec<(&String, &Value)>, NahError> {
     Some(p) => p,
   };
   Ok(properties.iter().collect())
+}
+
+#[cfg(test)]
+mod tests {
+  use crate::json_schema::*;
+  use serde_json::*;
+
+  #[test]
+  fn test_is_empty_object() {
+    assert_eq!(is_empty_object(&json!({})), true);
+    assert_eq!(is_empty_object(&json!({"key": 1})), false);
+    assert_eq!(is_empty_object(&json!(0)), false);
+  }
 }

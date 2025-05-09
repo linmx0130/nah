@@ -254,31 +254,35 @@ MCP server of `server_name` will be used as the current server."
                       }) {
                           Err(e) => println!("Failed to prepare file for argument template for tool calling {} > {} due to error: {}", server_name, tool_name, e),
                           Ok(()) => {
+                            if !json_schema::is_empty_object(&def.input_schema.as_object().and_then(|obj| obj.get("properties")).unwrap()) {
                               // load parameter and call tool
                               let launch_editor_outcome = launch_editor(&temp_filename);
                               if launch_editor_outcome.is_err() {
                                   println!("{}", launch_editor_outcome.unwrap_err());
                                   return;
                               }
-                              let arguments= match load_json_arguments(&temp_filename) {
-                                Err(e) => {
-                                  println!("{}", e);
-                                  return;
-                                },
-                                Ok(v) => v
-                              };
-                              let result = server_process.call_tool(tool_name, &arguments);
-                              match result {
-                                Err(e) => {
-                                  println!("Received error: {}", e);
-                                }
-                                Ok(result) => {
-                                  println!("Result: \n{}\n", serde_json::to_string_pretty(&result).unwrap());
-                                }
+                            } else {
+                              println!("No argument is requested. Directly call the function...");
+                            }
+                            let arguments= match load_json_arguments(&temp_filename) {
+                              Err(e) => {
+                                println!("{}", e);
+                                return;
+                              },
+                              Ok(v) => v
+                            };
+                            let result = server_process.call_tool(tool_name, &arguments);
+                            match result {
+                              Err(e) => {
+                                println!("Received error: {}", e);
                               }
-                              if std::fs::remove_file(&temp_filename).is_err() {
-                                  println!("Failed to clean up the temporary argument file.")
+                              Ok(result) => {
+                                println!("Result: \n{}\n", serde_json::to_string_pretty(&result).unwrap());
                               }
+                            }
+                            if std::fs::remove_file(&temp_filename).is_err() {
+                                println!("Failed to clean up the temporary argument file.")
+                            }
                           }
                       }
             }
