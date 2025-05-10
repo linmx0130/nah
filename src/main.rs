@@ -1,10 +1,11 @@
+mod chat;
 mod config;
 mod json_schema;
 mod mcp;
 mod types;
 
 use clap::Parser;
-use config::load_config;
+use config::{load_config, ModelConfig};
 use mcp::{MCPServerCommand, MCPServerProcess};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -32,6 +33,7 @@ struct AppContext {
   pub current_server: Option<String>,
   pub history_path: PathBuf,
   pub server_commands: HashMap<String, MCPServerCommand>,
+  pub model_config: Option<ModelConfig>,
 }
 
 fn main() {
@@ -74,6 +76,7 @@ fn main() {
     current_server: None,
     history_path,
     server_commands: data.mcp_servers,
+    model_config: data.model,
   };
 
   for (server_name, command) in context.server_commands.iter() {
@@ -151,6 +154,7 @@ impl AppContext {
           "inspect_prompt" => self.process_inspect_prompt(&command_parts),
           "get_prompt" => self.process_get_prompt(&command_parts),
           "set_timeout" => self.process_set_timeout(&command_parts),
+          "chat" => self.process_chat(),
           _ => {
             println!("Invalid command: {}", key);
           }
@@ -618,6 +622,14 @@ MCP server of `server_name` will be restarted. If no `server_name` is provided, 
         println!("No server is selected. Run `use` command to select a server.")
       }
     }
+  }
+
+  fn process_chat(&mut self) {
+    if self.model_config.is_none() {
+      println!("No model is supplied! Please set model config.");
+      return;
+    }
+    chat::process_chat(self)
   }
 }
 

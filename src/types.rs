@@ -81,4 +81,17 @@ impl NahError {
       message: format!("Failed to load arguments: {}", message),
     }
   }
+
+  pub fn model_error(model_name: &str, message: &str) -> NahError {
+    NahError {
+      code: 101,
+      message: format!("Error from model {}: {}", model_name, message),
+    }
+  }
+  pub fn model_invalid_response(model_name: &str) -> NahError {
+    NahError {
+      code: 102,
+      message: format!("Invalid response from model: {}", model_name),
+    }
+  }
 }

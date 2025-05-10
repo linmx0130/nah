@@ -82,7 +82,5 @@ pub fn load_config(path: PathBuf) -> Result<NahConfig, NahError> {
         }
       },
     );
-  println!("{:?}", model);
-
   Ok(NahConfig { mcp_servers, model })
 }
