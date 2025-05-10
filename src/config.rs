@@ -1,17 +1,33 @@
 use crate::mcp::MCPServerCommand;
 use crate::types::NahError;
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
 
+#[derive(Debug)]
+pub struct NahConfig {
+  pub mcp_servers: HashMap<String, MCPServerCommand>,
+  pub model: Option<ModelConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ModelConfig {
+  #[serde(rename = "baseUrl")]
+  pub base_url: String,
+  pub model: String,
+  #[serde(rename = "authToken")]
+  pub auth_token: String,
+}
+
 /**
- * Load MCP servers config file. The format follows Claude desktop app.
+ * Load Nah config file.
+ *
+ * MCP Server config part follow the format follows Claude desktop app.
  */
-pub fn load_mcp_servers_config(
-  path: PathBuf,
-) -> Result<HashMap<String, MCPServerCommand>, NahError> {
+pub fn load_config(path: PathBuf) -> Result<NahConfig, NahError> {
   let file = match File::open(&path) {
     Ok(f) => f,
     Err(_) => {
@@ -33,7 +49,7 @@ pub fn load_mcp_servers_config(
     }
   };
 
-  let mut result = HashMap::new();
+  let mut mcp_servers = HashMap::new();
   match &data["mcpServers"] {
     Value::Object(servers) => {
       for (key, value) in servers.iter() {
@@ -46,7 +62,7 @@ pub fn load_mcp_servers_config(
             )))
           }
         };
-        result.insert(key.to_string(), server_command);
+        mcp_servers.insert(key.to_string(), server_command);
       }
     }
     _ => {
@@ -56,5 +72,17 @@ pub fn load_mcp_servers_config(
       )))
     }
   }
-  Ok(result)
+  let model =
+    data.as_object().and_then(|obj| obj.get("model")).and_then(
+      |model| match serde_json::from_value::<ModelConfig>(model.clone()) {
+        Ok(v) => Some(v),
+        Err(e) => {
+          println!("{:?}", e);
+          None
+        }
+      },
+    );
+  println!("{:?}", model);
+
+  Ok(NahConfig { mcp_servers, model })
 }

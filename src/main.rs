@@ -4,7 +4,7 @@ mod mcp;
 mod types;
 
 use clap::Parser;
-use config::load_mcp_servers_config;
+use config::load_config;
 use mcp::{MCPServerCommand, MCPServerProcess};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -37,7 +37,7 @@ struct AppContext {
 fn main() {
   let args = Cli::parse();
   println!("Config file: {:?}", args.mcp_config_file);
-  let data = match load_mcp_servers_config(args.mcp_config_file) {
+  let data = match load_config(args.mcp_config_file) {
     Ok(d) => d,
     Err(e) => {
       println!("{}", e);
@@ -45,7 +45,7 @@ fn main() {
     }
   };
   println!("Found servers:");
-  for server in data.keys() {
+  for server in data.mcp_servers.keys() {
     println!(" - {}", server);
   }
   let timestamp = std::time::SystemTime::now()
@@ -73,7 +73,7 @@ fn main() {
     server_processes: HashMap::new(),
     current_server: None,
     history_path,
-    server_commands: data,
+    server_commands: data.mcp_servers,
   };
 
   for (server_name, command) in context.server_commands.iter() {
