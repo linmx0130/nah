@@ -650,6 +650,7 @@ Command list of nah: \n\
 * inspect_prompt:    Inspect detailed in of a prompt.\n\
 * get_prompt:        Get a prompt from current server.\n\
 * set_timeout:       Set communication timeout for the current server\n\
+* chat:              Chat with a LLM equiped with tools\n \
 * exit:              Stop all server and exit nah."
   );
 }
