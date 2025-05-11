@@ -60,7 +60,7 @@ pub fn process_chat(context: &mut AppContext) {
     match msg {
       Ok(message) => {
         chat_context.user_message(message);
-        let mut loop_end = true;
+        let mut loop_end: bool;
         loop {
           match chat_context.generate() {
             Err(e) => {

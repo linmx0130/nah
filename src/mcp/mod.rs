@@ -450,7 +450,7 @@ impl MCPServerProcess {
   /**
    * Fetch the list of available resources.
    */
-  pub fn fetch_resources_list(&mut self) -> Result<Vec<MCPResourceDefinition>, NahError> {
+  pub fn fetch_resources_list(&mut self) -> Result<Vec<&MCPResourceDefinition>, NahError> {
     let id: String = uuid::Uuid::new_v4().to_string();
     let request = MCPRequest::resources_list(&id);
     let response = self.send_and_wait_for_response(request)?;
@@ -473,10 +473,10 @@ impl MCPServerProcess {
           })
           .collect();
         self.resource_cache.clear();
-        for item in &result {
-          self.resource_cache.insert(item.name.clone(), item.clone());
+        for item in result.into_iter() {
+          self.resource_cache.insert(item.name.clone(), item);
         }
-        Ok(result)
+        Ok(self.resource_cache.values().collect())
       }
       None => Err(self.parse_response_error(&response)),
     }
