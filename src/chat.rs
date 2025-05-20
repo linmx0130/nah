@@ -1,5 +1,7 @@
 use core::time;
+use std::io::Write;
 use std::thread::sleep;
+use std::time::SystemTime;
 
 use crate::types::NahError;
 use crate::AppContext;
@@ -7,6 +9,7 @@ use crate::MCPServerProcess;
 use crate::ModelConfig;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::fs::{File, OpenOptions};
 use tokio::runtime::{Builder, Runtime};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -37,11 +40,23 @@ struct ChatContext {
   model_config: ModelConfig,
   messages: Vec<ChatMessage>,
   tokio_runtime: Runtime,
+  history_file: File,
 }
 
 pub fn process_chat(context: &mut AppContext) {
   let tools = pull_tools(context).unwrap();
   let model_config = context.model_config.clone().unwrap();
+  let timestamp = std::time::SystemTime::now()
+    .duration_since(SystemTime::UNIX_EPOCH)
+    .unwrap()
+    .as_secs();
+  let mut history_file_path = context.history_path.clone();
+  history_file_path.push(format!("chat_{}.jsonl", timestamp));
+  let history_file = OpenOptions::new()
+    .create(true)
+    .append(true)
+    .open(history_file_path)
+    .unwrap();
   let mut chat_context = ChatContext {
     tools,
     model_config,
@@ -51,6 +66,7 @@ pub fn process_chat(context: &mut AppContext) {
       .enable_time()
       .build()
       .unwrap(),
+    history_file,
   };
   println!("Chat with model: {}", chat_context.model_config.model);
 
@@ -124,7 +140,7 @@ impl ChatContext {
    * Append a user message to the chat context.
    */
   pub fn user_message(&mut self, message: String) {
-    self.messages.push(ChatMessage {
+    self.push_message(ChatMessage {
       role: "user".to_string(),
       content: message,
       tool_call_id: None,
@@ -187,19 +203,17 @@ impl ChatContext {
       return Err(NahError::model_invalid_response(&self.model_config.model));
     }
     let choice = &choices[0];
-    self
-      .messages
-      .push(match choice.as_object().and_then(|c| c.get("message")) {
-        Some(p) => match serde_json::from_value::<ChatMessage>(p.clone()) {
-          Ok(v) => v,
-          Err(_) => {
-            return Err(NahError::model_invalid_response(&self.model_config.model));
-          }
-        },
-        None => {
+    self.push_message(match choice.as_object().and_then(|c| c.get("message")) {
+      Some(p) => match serde_json::from_value::<ChatMessage>(p.clone()) {
+        Ok(v) => v,
+        Err(_) => {
           return Err(NahError::model_invalid_response(&self.model_config.model));
         }
-      });
+      },
+      None => {
+        return Err(NahError::model_invalid_response(&self.model_config.model));
+      }
+    });
     Ok(&self.messages[self.messages.len() - 1])
   }
 
@@ -231,9 +245,18 @@ impl ChatContext {
       }
     }
     for item in tool_call_responses {
-      self.messages.push(item);
+      self.push_message(item);
     }
     Ok(())
+  }
+
+  fn push_message(&mut self, msg: ChatMessage) {
+    let _ = self
+      .history_file
+      .write(serde_json::to_string(&msg).unwrap().as_bytes());
+    let _ = self.history_file.write(b"\n");
+    let _ = self.history_file.flush();
+    self.messages.push(msg);
   }
 }
 
