@@ -152,18 +152,31 @@ impl ChatContext {
    * Generate assistant message.
    */
   pub fn generate(&mut self) -> Result<&ChatMessage, NahError> {
-    let data = json!({
+    let mut data = json!({
         "model": self.model_config.model,
         "messages": self.messages.clone(),
         "stream": false,
         "max_token": 4096,
         "tools": self.tools.clone(),
-        "enable_thinking": false,
         "n": 1,
         "temperature": 0.7,
         "top_p": 0.9,
-        "frequency_penalty": 0.5,
+        "frequency_penalty": 0.5
     });
+
+    self
+      .model_config
+      .extra_params
+      .as_ref()
+      .and_then(|v| v.as_object())
+      .and_then(|extra_params| {
+        extra_params.iter().for_each(|(key, value)| {
+          data
+            .as_object_mut()
+            .and_then(|o| o.insert(key.to_owned(), value.to_owned()));
+        });
+        Some(())
+      });
 
     let client = reqwest::Client::new();
     let endpoint = format!("{}/chat/completions", self.model_config.base_url);

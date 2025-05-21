@@ -20,6 +20,8 @@ pub struct ModelConfig {
   pub model: String,
   #[serde(rename = "authToken")]
   pub auth_token: String,
+  #[serde(rename = "extraParams")]
+  pub extra_params: Option<Value>,
 }
 
 /**
