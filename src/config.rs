@@ -63,7 +63,10 @@ pub fn load_config(path: PathBuf) -> Result<NahConfig, NahError> {
   Ok(NahConfig { mcp_servers, model })
 }
 
-fn load_mcp_servers(data: &Value, path: &PathBuf) -> Result<HashMap<String, MCPServerCommand>, NahError> {
+fn load_mcp_servers(
+  data: &Value,
+  path: &PathBuf,
+) -> Result<HashMap<String, MCPServerCommand>, NahError> {
   let mut mcp_servers = HashMap::new();
   match &data["mcpServers"] {
     Value::Object(servers) => {
@@ -81,11 +84,9 @@ fn load_mcp_servers(data: &Value, path: &PathBuf) -> Result<HashMap<String, MCPS
       }
       Ok(mcp_servers)
     }
-    _ => {
-     Err(NahError::io_error(&format!(
-        "Invalid mcp server config file {}",
-        path.display()
-      )))
-    }
+    _ => Err(NahError::io_error(&format!(
+      "Invalid mcp server config file {}",
+      path.display()
+    ))),
   }
 }
