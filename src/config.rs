@@ -49,6 +49,21 @@ pub fn load_config(path: PathBuf) -> Result<NahConfig, NahError> {
     }
   };
 
+  let mcp_servers = load_mcp_servers(&data, &path)?;
+  let model =
+    data.as_object().and_then(|obj| obj.get("model")).and_then(
+      |model| match serde_json::from_value::<ModelConfig>(model.clone()) {
+        Ok(v) => Some(v),
+        Err(e) => {
+          println!("{:?}", e);
+          None
+        }
+      },
+    );
+  Ok(NahConfig { mcp_servers, model })
+}
+
+fn load_mcp_servers(data: &Value, path: &PathBuf) -> Result<HashMap<String, MCPServerCommand>, NahError> {
   let mut mcp_servers = HashMap::new();
   match &data["mcpServers"] {
     Value::Object(servers) => {
@@ -64,23 +79,13 @@ pub fn load_config(path: PathBuf) -> Result<NahConfig, NahError> {
         };
         mcp_servers.insert(key.to_string(), server_command);
       }
+      Ok(mcp_servers)
     }
     _ => {
-      return Err(NahError::io_error(&format!(
+     Err(NahError::io_error(&format!(
         "Invalid mcp server config file {}",
         path.display()
       )))
     }
   }
-  let model =
-    data.as_object().and_then(|obj| obj.get("model")).and_then(
-      |model| match serde_json::from_value::<ModelConfig>(model.clone()) {
-        Ok(v) => Some(v),
-        Err(e) => {
-          println!("{:?}", e);
-          None
-        }
-      },
-    );
-  Ok(NahConfig { mcp_servers, model })
 }
