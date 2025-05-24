@@ -1,8 +1,12 @@
 use core::time;
+use std::fs;
+use std::io::Read;
 use std::io::Write;
+use std::path::Path;
 use std::thread::sleep;
 use std::time::SystemTime;
 
+use crate::editor::launch_editor;
 use crate::types::NahError;
 use crate::AppContext;
 use crate::MCPServerProcess;
@@ -42,6 +46,7 @@ struct ChatContext {
   tokio_runtime: Runtime,
   history_file: File,
 }
+const MESSAGE_FILE_PATH: &'static str = ".nah_user_message";
 
 pub fn process_chat(context: &mut AppContext) {
   let tools = pull_tools(context).unwrap();
@@ -72,34 +77,48 @@ pub fn process_chat(context: &mut AppContext) {
 
   let mut rl = rustyline::DefaultEditor::new().unwrap();
   loop {
-    let msg = rl.readline("[User]: ");
-    match msg {
-      Ok(message) => {
-        chat_context.user_message(message);
-        let mut loop_end: bool;
-        loop {
-          match chat_context.generate() {
+    println!("Press [ENTER] to draft user message, `exit` to end this chat.");
+    let command = rl.readline("[chat]>> ");
+    match command {
+      Ok(cmd) => {
+        let trimed_cmd = cmd.trim();
+        if trimed_cmd.len() == 0 {
+          let message = match launch_editor_for_user_message() {
+            Ok(l) => l,
             Err(e) => {
-              println!("Error: {}", e);
-              println!("Retry after 30 seconds...");
-              sleep(time::Duration::from_secs(30));
-              loop_end = false;
+              println!("Error: {}", e.message);
+              break;
             }
-            Ok(msg) => {
-              if msg.tool_calls.is_some() {
-                if chat_context.process_tool_calls(context).is_err() {
-                  println!("Error happened during tool calls, may have wrong result!");
-                }
+          };
+          println!("[User]: {}", message);
+          chat_context.user_message(message);
+          let mut loop_end: bool;
+          loop {
+            match chat_context.generate() {
+              Err(e) => {
+                println!("Error: {}", e);
+                println!("Retry after 30 seconds...");
+                sleep(time::Duration::from_secs(30));
                 loop_end = false;
-              } else {
-                println!("[Assistant]: {}", msg.content);
-                loop_end = true;
+              }
+              Ok(msg) => {
+                if msg.tool_calls.is_some() {
+                  if chat_context.process_tool_calls(context).is_err() {
+                    println!("Error happened during tool calls, may have wrong result!");
+                  }
+                  loop_end = false;
+                } else {
+                  println!("[Assistant]: {}", msg.content);
+                  loop_end = true;
+                }
               }
             }
+            if loop_end {
+              break;
+            }
           }
-          if loop_end {
-            break;
-          }
+        } else if trimed_cmd == "exit" {
+          break;
         }
       }
       Err(rustyline::error::ReadlineError::Interrupted) => break,
@@ -295,4 +314,43 @@ fn unpack_mcp_text_contents(server_name: &str, result: &Value) -> Result<String,
     }
   }
   Ok(text)
+}
+
+fn launch_editor_for_user_message() -> Result<String, NahError> {
+  let _ = fs::remove_file(MESSAGE_FILE_PATH);
+  match OpenOptions::new()
+    .create(true)
+    .write(true)
+    .open(MESSAGE_FILE_PATH)
+  {
+    Ok(mut f) => {
+      let _ = f.write(b"# Draft your message here. Lines start wtih # will be ignored.\n");
+    }
+    Err(_) => {
+      return Err(NahError::io_error("Failed to open the user message file."));
+    }
+  }
+  let _ = launch_editor(MESSAGE_FILE_PATH)?;
+  let mut file = open_file_or_throw()?;
+  let mut buf: String = String::new();
+  if file.read_to_string(&mut buf).is_err() {
+    return Err(NahError::io_error("Failed to open the user message file."));
+  }
+  let mut message = String::new();
+  buf
+    .split('\n')
+    .filter(|l| !l.starts_with('#'))
+    .for_each(|l| {
+      message.push_str(l);
+      message.push('\n');
+    });
+  Ok(message)
+}
+
+fn open_file_or_throw() -> Result<File, NahError> {
+  let file = match File::open(&MESSAGE_FILE_PATH) {
+    Ok(f) => f,
+    Err(_) => return Err(NahError::io_error("Failed to open the user message file")),
+  };
+  Ok(file)
 }

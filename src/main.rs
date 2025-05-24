@@ -1,11 +1,13 @@
 mod chat;
 mod config;
+mod editor;
 mod json_schema;
 mod mcp;
 mod types;
 
 use clap::Parser;
 use config::{load_config, ModelConfig};
+use editor::launch_editor;
 use mcp::{MCPServerCommand, MCPServerProcess};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -655,35 +657,14 @@ Command list of nah: \n\
   );
 }
 
-fn launch_editor(filename: &str) -> Result<(), NahError> {
-  let editor = std::env::var("EDITOR").unwrap_or("vi".to_owned());
-  match std::process::Command::new(editor)
-    .arg(filename)
-    .spawn()
-    .unwrap()
-    .wait()
-  {
-    Ok(exit_status) => {
-      if exit_status.success() {
-        Ok(())
-      } else {
-        Err(NahError::editor_error(&format!(
-          "return value of the editor is {}",
-          exit_status.code().unwrap_or(0)
-        )))
-      }
-    }
-    Err(e) => Err(NahError::editor_error(&format!("{}", e))),
-  }
-}
-
 fn load_json_arguments(filename: &str) -> Result<Value, NahError> {
   let mut buf = String::new();
-  let mut file = File::open(&filename).unwrap();
+  let mut file = match File::open(&filename) {
+    Ok(f) => f,
+    Err(_) => return Err(NahError::io_error("Failed to open the argument file")),
+  };
   if file.read_to_string(&mut buf).is_err() {
-    return Err(NahError::invalid_argument_error(
-      "failed to open the argument file.",
-    ));
+    return Err(NahError::io_error("Failed to open the argument file."));
   }
   let mut arg_json_buf = String::new();
   buf
