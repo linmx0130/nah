@@ -1,0 +1,18 @@
+{
+    "mcpServers": {
+        "weather": {
+            "command": "uv",
+            "args": [
+                "--directory",
+		        "/ABSOLUTE/PATH/TO/PARENT/FOLDER/weather",
+                "run",
+                "weather.py"
+            ]
+	}
+    },
+    "model": {
+        "baseUrl": "https://api.openai.com/v1",
+	    "model": "o4-mini",
+	    "authToken": "OPENAI_API_KEY"
+    }
+}

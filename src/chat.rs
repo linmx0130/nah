@@ -2,7 +2,6 @@ use core::time;
 use std::fs;
 use std::io::Read;
 use std::io::Write;
-use std::path::Path;
 use std::thread::sleep;
 use std::time::SystemTime;
 
@@ -129,6 +128,8 @@ pub fn process_chat(context: &mut AppContext) {
       }
     }
   }
+  // Have a try to remove the user message draft file.
+  let _ = fs::remove_file(MESSAGE_FILE_PATH);
 }
 
 /**
