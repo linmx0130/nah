@@ -15,9 +15,9 @@ use std::{
 };
 
 use crate::types::NahError;
+use nah_mcp_types::request;
+use nah_mcp_types::notification;
 
-mod notification;
-mod request;
 pub use notification::MCPNotification;
 pub use request::MCPRequest;
 
