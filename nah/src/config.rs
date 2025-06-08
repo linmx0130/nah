@@ -1,4 +1,4 @@
-use crate::mcp::MCPServerCommand;
+use crate::mcp::MCPLocalServerCommand;
 use crate::types::NahError;
 use serde::Deserialize;
 use serde_json::Value;
@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 #[derive(Debug)]
 pub struct NahConfig {
-  pub mcp_servers: HashMap<String, MCPServerCommand>,
+  pub mcp_servers: HashMap<String, MCPLocalServerCommand>,
   pub model: Option<ModelConfig>,
 }
 
@@ -68,7 +68,7 @@ pub fn load_config(path: PathBuf) -> Result<NahConfig, NahError> {
 fn load_mcp_servers(
   data: &Value,
   path: &PathBuf,
-) -> Result<HashMap<String, MCPServerCommand>, NahError> {
+) -> Result<HashMap<String, MCPLocalServerCommand>, NahError> {
   let mut mcp_servers = HashMap::new();
   match &data["mcpServers"] {
     Value::Object(servers) => {

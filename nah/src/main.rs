@@ -8,7 +8,7 @@ mod types;
 use clap::Parser;
 use config::{load_config, ModelConfig};
 use editor::launch_editor;
-use mcp::{MCPServerCommand, MCPServerProcess};
+use mcp::{MCPLocalServerCommand, MCPLocalServerProcess};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::File;
@@ -31,10 +31,10 @@ struct Cli {
  * Global context for nah app.
  */
 struct AppContext {
-  pub server_processes: HashMap<String, MCPServerProcess>,
+  pub server_processes: HashMap<String, MCPLocalServerProcess>,
   pub current_server: Option<String>,
   pub history_path: PathBuf,
-  pub server_commands: HashMap<String, MCPServerCommand>,
+  pub server_commands: HashMap<String, MCPLocalServerCommand>,
   pub model_config: Option<ModelConfig>,
 }
 
@@ -85,7 +85,7 @@ fn main() {
     println!("Launching server: {}", server_name);
 
     let process =
-      match MCPServerProcess::start_and_init(server_name, command, &context.history_path) {
+      match MCPLocalServerProcess::start_and_init(server_name, command, &context.history_path) {
         Err(e) => {
           println!(
             "Fatal error while launching {}, give up this server.",
@@ -230,17 +230,18 @@ MCP server of `server_name` will be restarted. If no `server_name` is provided, 
       }
     };
 
-    let process = match MCPServerProcess::start_and_init(server_name, command, &self.history_path) {
-      Err(e) => {
-        println!(
-          "Fatal error while launching {}, give up this server.",
-          server_name
-        );
-        println!("Error: {}", e);
-        return;
-      }
-      Ok(p) => p,
-    };
+    let process =
+      match MCPLocalServerProcess::start_and_init(server_name, command, &self.history_path) {
+        Err(e) => {
+          println!(
+            "Fatal error while launching {}, give up this server.",
+            server_name
+          );
+          println!("Error: {}", e);
+          return;
+        }
+        Ok(p) => p,
+      };
 
     let old_process = self
       .server_processes
@@ -613,7 +614,7 @@ MCP server of `server_name` will be restarted. If no `server_name` is provided, 
    */
   fn process_with_current_server<F>(&mut self, f: F)
   where
-    F: Fn(&str, &mut MCPServerProcess),
+    F: Fn(&str, &mut MCPLocalServerProcess),
   {
     match &self.current_server {
       Some(server_name) => {

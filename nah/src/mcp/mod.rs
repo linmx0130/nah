@@ -15,123 +15,25 @@ use std::{
 };
 
 use crate::types::NahError;
-use nah_mcp_types::request;
 use nah_mcp_types::notification;
-
+use nah_mcp_types::request;
+use nah_mcp_types::*;
 pub use notification::MCPNotification;
 pub use request::MCPRequest;
-
-/**
- * MCP Response is a JSON-RPC response.
- */
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MCPResponse {
-  jsonrpc: String,
-  pub id: String,
-  pub result: Option<Value>,
-  pub error: Option<Value>,
-}
 
 /**
  * Describes how to launch a MCP server with a command.
  */
 #[derive(Debug, Deserialize)]
-pub struct MCPServerCommand {
+pub struct MCPLocalServerCommand {
   pub command: String,
   pub args: Vec<String>,
 }
 
 /**
- * Describe a MCP tool.
- */
-#[derive(Debug, Deserialize, Clone)]
-pub struct MCPToolDefinition {
-  pub name: String,
-  pub description: Option<String>,
-  #[serde(rename = "inputSchema")]
-  pub input_schema: Value,
-}
-
-/**
- * Describe a MCP Resource.
- */
-#[derive(Debug, Deserialize, Clone)]
-pub struct MCPResourceDefinition {
-  pub uri: Option<String>,
-  #[serde(rename = "uriTemplate")]
-  pub uri_template: Option<String>,
-  pub name: String,
-  pub description: Option<String>,
-  #[serde(rename = "mimeType")]
-  pub mime_type: Option<String>,
-  pub size: Option<usize>,
-}
-
-/**
- * Describe a MCP Resource content.
- */
-#[derive(Debug, Deserialize, Serialize)]
-pub struct MCPResourceContent {
-  pub uri: String,
-  pub mime: Option<String>,
-  pub text: Option<String>,
-  pub blob: Option<String>,
-}
-
-/**
- * Describe a MCP prompt.
- */
-#[derive(Debug, Deserialize)]
-pub struct MCPPromptDefinition {
-  pub name: String,
-  pub description: Option<String>,
-  pub arguments: Option<Vec<MCPPromptArgument>>,
-}
-
-/**
- * Describe an argument that a prompt can accept.
- */
-#[derive(Debug, Deserialize)]
-pub struct MCPPromptArgument {
-  pub name: String,
-  pub description: Option<String>,
-  pub required: Option<bool>,
-}
-
-/**
- * Describe a prompt message content. It could be text, image, audio or other supported data.
- */
-#[derive(Debug, Deserialize, Serialize)]
-pub struct PromptMessageContent {
-  #[serde(rename = "type")]
-  pub type_: String,
-  pub text: Option<String>,
-  pub data: Option<String>,
-  #[serde(rename = "mimeType")]
-  pub mime_type: Option<String>,
-  pub resource: Option<Value>,
-  pub annotations: Option<Value>,
-}
-
-/**
- * Describes a prompt message.
- */
-#[derive(Debug, Deserialize, Serialize)]
-pub struct PromptMessage {
-  pub role: String,
-  pub content: PromptMessageContent,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct MCPPromptResult {
-  pub description: Option<String>,
-  pub messages: Vec<PromptMessage>,
-}
-
-/**
  * Wrapper of a MCP server process.
  */
-pub struct MCPServerProcess {
+pub struct MCPLocalServerProcess {
   pub server_name: String,
   history_file: File,
   process: Child,
@@ -143,13 +45,13 @@ pub struct MCPServerProcess {
   timeout_ms: u64,
 }
 
-impl MCPServerProcess {
+impl MCPLocalServerProcess {
   /**
    * Start and initialize a MCP Server.
    */
   pub fn start_and_init(
     name: &str,
-    mcp_command: &MCPServerCommand,
+    mcp_command: &MCPLocalServerCommand,
     history_path: &PathBuf,
   ) -> Result<Self, NahError> {
     let mut server_command = Command::new(&mcp_command.command);
@@ -201,7 +103,7 @@ impl MCPServerProcess {
     let stdin = server_process.stdin.take().unwrap();
     let stdout = server_process.stdout.take().unwrap();
     let stdout_reader = BufReader::new(stdout);
-    let mut result = MCPServerProcess {
+    let mut result = MCPLocalServerProcess {
       server_name: name.to_string(),
       process: server_process,
       stdin,
