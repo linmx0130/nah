@@ -1,7 +1,7 @@
 /**
  * Data structure and utilities to handle Model Context Protocol.
  */
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -36,6 +36,26 @@ pub struct MCPRemoteServerConfig {
   pub headers: HashMap<String, String>,
 }
 
+pub trait MCPServer {
+  type ConfigType;
+
+  /**
+   * Start and initialize a MCP Server instance.
+   */
+  fn start_and_init(
+    name: &str,
+    config: &Self::ConfigType,
+    history_path: &PathBuf,
+  ) -> Result<Self, NahError>
+  where
+    Self: Sized;
+
+  /**
+   * Send a MCP Request and wait for its response. This method will ignore all non-relevent messages for now.
+   */
+  fn send_and_wait_for_response(&mut self, request: MCPRequest) -> Result<MCPResponse, NahError>;
+}
+
 /**
  * Wrapper of a MCP server process.
  */
@@ -51,11 +71,10 @@ pub struct MCPLocalServerProcess {
   timeout_ms: u64,
 }
 
-impl MCPLocalServerProcess {
-  /**
-   * Start and initialize a MCP Server.
-   */
-  pub fn start_and_init(
+impl MCPServer for MCPLocalServerProcess {
+  type ConfigType = MCPLocalServerCommand;
+
+  fn start_and_init(
     name: &str,
     mcp_command: &MCPLocalServerCommand,
     history_path: &PathBuf,
@@ -139,6 +158,43 @@ impl MCPLocalServerProcess {
     Ok(result)
   }
 
+  fn send_and_wait_for_response(&mut self, request: MCPRequest) -> Result<MCPResponse, NahError> {
+    let id = request.id.clone();
+    self.send_data(request)?;
+    let mut buf = String::new();
+    loop {
+      let incoming_msg = self.receive_data::<Value>(&mut buf)?;
+      let incoming_obj = incoming_msg.as_object();
+      if incoming_obj.is_none() {
+        continue;
+      }
+      let incoming_data = incoming_obj.unwrap();
+      match incoming_data.get("id").and_then(|v| v.as_str()) {
+        None => {
+          // Try to unpack the message as a notification
+          match serde_json::from_value::<MCPNotification>(incoming_msg) {
+            Ok(notif) => {
+              self.process_notification(notif);
+            }
+            _ => {
+              // Unknown message. Ignore it for now.
+            }
+          }
+        }
+        Some(incoming_id) => {
+          if incoming_id == id {
+            return match serde_json::from_value::<MCPResponse>(incoming_msg) {
+              Ok(resp) => Ok(resp),
+              Err(_e) => Err(NahError::mcp_server_invalid_response(&self.server_name)),
+            };
+          }
+        }
+      }
+    }
+  }
+}
+
+impl MCPLocalServerProcess {
   /**
    * Set communication timeout.
    *
@@ -211,47 +267,6 @@ impl MCPLocalServerProcess {
     match serde_json::from_str::<T>(response_json) {
       Ok(r) => Ok(r),
       Err(_e) => Err(NahError::mcp_server_invalid_response(&self.server_name)),
-    }
-  }
-
-  /**
-   * Send a MCP Request and wait for its response. This method will ignore all non-relevent messages for now.
-   */
-  pub fn send_and_wait_for_response(
-    &mut self,
-    request: MCPRequest,
-  ) -> Result<MCPResponse, NahError> {
-    let id = request.id.clone();
-    self.send_data(request)?;
-    let mut buf = String::new();
-    loop {
-      let incoming_msg = self.receive_data::<Value>(&mut buf)?;
-      let incoming_obj = incoming_msg.as_object();
-      if incoming_obj.is_none() {
-        continue;
-      }
-      let incoming_data = incoming_obj.unwrap();
-      match incoming_data.get("id").and_then(|v| v.as_str()) {
-        None => {
-          // Try to unpack the message as a notification
-          match serde_json::from_value::<MCPNotification>(incoming_msg) {
-            Ok(notif) => {
-              self.process_notification(notif);
-            }
-            _ => {
-              // Unknown message. Ignore it for now.
-            }
-          }
-        }
-        Some(incoming_id) => {
-          if incoming_id == id {
-            return match serde_json::from_value::<MCPResponse>(incoming_msg) {
-              Ok(resp) => Ok(resp),
-              Err(_e) => Err(NahError::mcp_server_invalid_response(&self.server_name)),
-            };
-          }
-        }
-      }
     }
   }
 

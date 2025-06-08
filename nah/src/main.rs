@@ -8,7 +8,7 @@ mod types;
 use clap::Parser;
 use config::{load_config, ModelConfig};
 use editor::launch_editor;
-use mcp::{MCPLocalServerCommand, MCPLocalServerProcess};
+use mcp::{MCPLocalServerCommand, MCPLocalServerProcess, MCPServer};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::File;
