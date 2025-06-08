@@ -1,4 +1,5 @@
 use crate::mcp::MCPLocalServerCommand;
+use crate::mcp::MCPRemoteServerConfig;
 use crate::types::NahError;
 use serde::Deserialize;
 use serde_json::Value;
@@ -10,6 +11,7 @@ use std::path::PathBuf;
 #[derive(Debug)]
 pub struct NahConfig {
   pub mcp_servers: HashMap<String, MCPLocalServerCommand>,
+  pub mcp_remote_servers: HashMap<String, MCPRemoteServerConfig>,
   pub model: Option<ModelConfig>,
 }
 
@@ -51,7 +53,7 @@ pub fn load_config(path: PathBuf) -> Result<NahConfig, NahError> {
     }
   };
 
-  let mcp_servers = load_mcp_servers(&data, &path)?;
+  let (mcp_servers, mcp_remote_servers) = load_mcp_servers(&data, &path)?;
   let model =
     data.as_object().and_then(|obj| obj.get("model")).and_then(
       |model| match serde_json::from_value::<ModelConfig>(model.clone()) {
@@ -62,33 +64,97 @@ pub fn load_config(path: PathBuf) -> Result<NahConfig, NahError> {
         }
       },
     );
-  Ok(NahConfig { mcp_servers, model })
+  Ok(NahConfig {
+    mcp_servers,
+    mcp_remote_servers,
+    model,
+  })
 }
 
 fn load_mcp_servers(
   data: &Value,
   path: &PathBuf,
-) -> Result<HashMap<String, MCPLocalServerCommand>, NahError> {
+) -> Result<
+  (
+    HashMap<String, MCPLocalServerCommand>,
+    HashMap<String, MCPRemoteServerConfig>,
+  ),
+  NahError,
+> {
   let mut mcp_servers = HashMap::new();
+  let mut mcp_remote_servers = HashMap::new();
   match &data["mcpServers"] {
     Value::Object(servers) => {
       for (key, value) in servers.iter() {
-        let server_command = match serde_json::from_value(value.clone()) {
-          Ok(v) => v,
-          Err(_) => {
-            return Err(NahError::invalid_value(&format!(
-              "invalid server command for tool {}",
-              key
-            )))
-          }
-        };
-        mcp_servers.insert(key.to_string(), server_command);
+        if value.as_object().is_some_and(|v| v.contains_key("command")) {
+          let server_command = match serde_json::from_value(value.clone()) {
+            Ok(v) => v,
+            Err(_) => {
+              return Err(NahError::invalid_value(&format!(
+                "invalid server command for tool {}",
+                key
+              )))
+            }
+          };
+          mcp_servers.insert(key.to_string(), server_command);
+        } else if value.as_object().is_some_and(|v| v.contains_key("url")) {
+          let remote_server_config = match serde_json::from_value(value.clone()) {
+            Ok(v) => v,
+            Err(_) => {
+              return Err(NahError::invalid_value(&format!(
+                "invalid server command for tool {}",
+                key
+              )))
+            }
+          };
+          mcp_remote_servers.insert(key.to_string(), remote_server_config);
+        } else {
+          return Err(NahError::invalid_value(&format!(
+            "invalid server command for tool {}",
+            key
+          )));
+        }
       }
-      Ok(mcp_servers)
+      Ok((mcp_servers, mcp_remote_servers))
     }
     _ => Err(NahError::io_error(&format!(
       "Invalid mcp server config file {}",
       path.display()
     ))),
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::load_mcp_servers;
+  use serde_json::Value;
+  use std::path::PathBuf;
+
+  #[test]
+  fn test_load_mcp_servers() {
+    let test_data = r#"
+      {
+        "mcpServers": {
+          "weather": {
+            "command": "uv",
+            "args": ["run", "weather.py"]
+          },
+          "huggingface": {
+            "url": "https://huggingface.co/mcp",
+            "headers": {
+              "Authorization": "Bearer HF_TOKEN"
+            }
+          }
+        }
+      }"#;
+    let test_value: Value = serde_json::from_str(test_data).unwrap();
+
+    let (mcp_servers, mcp_remote_servers) = load_mcp_servers(&test_value, &PathBuf::new()).unwrap();
+    assert_eq!(mcp_servers.len(), 1);
+    assert!(mcp_servers.contains_key("weather"));
+    assert!(mcp_remote_servers.contains_key("huggingface"));
+    assert!(mcp_remote_servers["huggingface"]
+      .headers
+      .contains_key("Authorization"));
   }
 }

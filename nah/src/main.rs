@@ -101,6 +101,7 @@ fn main() {
       .server_processes
       .insert(server_name.to_owned(), process);
   }
+  println!("Remote server: {:?}", data.mcp_remote_servers);
 
   let mut rl = rustyline::DefaultEditor::new().unwrap();
   loop {

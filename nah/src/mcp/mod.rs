@@ -30,6 +30,12 @@ pub struct MCPLocalServerCommand {
   pub args: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct MCPRemoteServerConfig {
+  pub url: String,
+  pub headers: HashMap<String, String>,
+}
+
 /**
  * Wrapper of a MCP server process.
  */
