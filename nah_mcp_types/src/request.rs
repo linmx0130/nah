@@ -8,6 +8,7 @@ pub struct MCPRequest {
   jsonrpc: String,
   pub method: String,
   pub id: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub params: Option<Value>,
 }
 

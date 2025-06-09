@@ -17,6 +17,8 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 use types::NahError;
 
+use crate::mcp::{MCPHTTPServerConnection, MCPRemoteServerConfig};
+
 /// Read some lines of a file
 #[derive(Debug, Parser)]
 struct Cli {
@@ -35,6 +37,7 @@ struct AppContext {
   pub current_server: Option<String>,
   pub history_path: PathBuf,
   pub server_commands: HashMap<String, MCPLocalServerCommand>,
+  pub remote_server_configs: HashMap<String, MCPRemoteServerConfig>,
   pub model_config: Option<ModelConfig>,
 }
 
@@ -78,6 +81,7 @@ fn main() {
     current_server: None,
     history_path,
     server_commands: data.mcp_servers,
+    remote_server_configs: data.mcp_remote_servers,
     model_config: data.model,
   };
 
@@ -101,7 +105,24 @@ fn main() {
       .server_processes
       .insert(server_name.to_owned(), Box::new(process));
   }
-  println!("Remote server: {:?}", data.mcp_remote_servers);
+
+  for (server_name, config) in context.remote_server_configs.iter() {
+    println!("Initializing remote server: {}", server_name);
+    let conn = match MCPHTTPServerConnection::init(server_name, config) {
+      Err(e) => {
+        println!(
+          "Fatal error while initializing {}, give up this server.",
+          server_name
+        );
+        println!("Error: {}", e);
+        continue;
+      }
+      Ok(p) => p,
+    };
+    context
+      .server_processes
+      .insert(server_name.to_owned(), Box::new(conn));
+  }
 
   let mut rl = rustyline::DefaultEditor::new().unwrap();
   loop {

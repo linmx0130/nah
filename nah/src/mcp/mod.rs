@@ -1,23 +1,23 @@
+/**
+ * Data structure and utilities to handle Model Context Protocol.
+ */
 use crate::types::NahError;
 use nah_mcp_types::request;
 use nah_mcp_types::*;
 pub use request::MCPRequest;
-/**
- * Data structure and utilities to handle Model Context Protocol.
- */
-use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 mod local_server;
 pub use local_server::MCPLocalServerCommand;
 pub use local_server::MCPLocalServerProcess;
+mod http_server;
+pub use http_server::MCPHTTPServerConnection;
+pub use http_server::MCPRemoteServerConfig;
 
-#[derive(Debug, Deserialize)]
-pub struct MCPRemoteServerConfig {
-  pub url: String,
-  pub headers: HashMap<String, String>,
-}
-
+/**
+ * The trait for all MCP Server adapter implementations. Nah interacts with different MCP servers
+ * in this same interface.
+ */
 pub trait MCPServer {
   /**
    * Send a MCP Request and wait for its response. This method will ignore all non-relevent messages for now.
@@ -87,4 +87,44 @@ pub trait MCPServer {
     prompt_name: &str,
     args: &HashMap<String, String>,
   ) -> Result<MCPPromptResult, NahError>;
+}
+
+pub(in crate::mcp) fn parse_tools_list_from_response(
+  server_name: &str,
+  response: MCPResponse,
+) -> Result<Vec<MCPToolDefinition>, NahError> {
+  let mut result = Vec::new();
+  match response.result {
+    None => {
+      return Err(match response.error {
+        None => NahError::mcp_server_communication_error(server_name),
+        Some(err) => {
+          NahError::mcp_server_error(server_name, &serde_json::to_string_pretty(&err).unwrap())
+        }
+      });
+    }
+    Some(res) => {
+      let tools = match res
+        .as_object()
+        .and_then(|v| v.get("tools"))
+        .and_then(|v| v.as_array())
+      {
+        None => {
+          return Err(NahError::mcp_server_invalid_response(server_name));
+        }
+        Some(t) => t,
+      };
+
+      for item in tools.iter() {
+        let tool: MCPToolDefinition = match serde_json::from_value(item.clone()) {
+          Ok(t) => t,
+          Err(_e) => {
+            return Err(NahError::mcp_server_invalid_response(server_name));
+          }
+        };
+        result.push(tool);
+      }
+    }
+  };
+  return Ok(result);
 }

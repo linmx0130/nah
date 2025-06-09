@@ -11,7 +11,7 @@ use std::{
   process::{Child, ChildStdin, ChildStdout, Command, Stdio},
 };
 
-use crate::mcp::MCPServer;
+use crate::mcp::{parse_tools_list_from_response, MCPServer};
 use crate::types::NahError;
 use nah_mcp_types::notification;
 use nah_mcp_types::request::MCPRequest;
@@ -87,42 +87,12 @@ impl MCPServer for MCPLocalServerProcess {
     let request = MCPRequest::tools_list(&id);
     let response = self.send_and_wait_for_response(request)?;
 
-    let result = match response.result {
-      None => {
-        return Err(match response.error {
-          None => NahError::mcp_server_communication_error(&self.server_name),
-          Some(err) => NahError::mcp_server_error(
-            &self.server_name,
-            &serde_json::to_string_pretty(&err).unwrap(),
-          ),
-        });
-      }
-      Some(res) => {
-        let tools = match res
-          .as_object()
-          .and_then(|v| v.get("tools"))
-          .and_then(|v| v.as_array())
-        {
-          None => {
-            return Err(NahError::mcp_server_invalid_response(&self.server_name));
-          }
-          Some(t) => t,
-        };
-
-        self.tool_cache.clear();
-        for item in tools.iter() {
-          let tool: MCPToolDefinition = match serde_json::from_value(item.clone()) {
-            Ok(t) => t,
-            Err(_e) => {
-              return Err(NahError::mcp_server_invalid_response(&self.server_name));
-            }
-          };
-          self.tool_cache.insert(tool.name.clone(), tool);
-        }
-        self.tool_cache.values().collect()
-      }
-    };
-    Ok(result)
+    let tool_list = parse_tools_list_from_response(&self.server_name, response)?;
+    self.tool_cache.clear();
+    for item in tool_list {
+      self.tool_cache.insert(item.name.to_owned(), item);
+    }
+    Ok(self.tool_cache.values().collect())
   }
 
   fn call_tool(&mut self, tool_name: &str, args: &Value) -> Result<Value, NahError> {
