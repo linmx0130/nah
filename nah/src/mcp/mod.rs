@@ -37,23 +37,74 @@ pub struct MCPRemoteServerConfig {
 }
 
 pub trait MCPServer {
-  type ConfigType;
-
-  /**
-   * Start and initialize a MCP Server instance.
-   */
-  fn start_and_init(
-    name: &str,
-    config: &Self::ConfigType,
-    history_path: &PathBuf,
-  ) -> Result<Self, NahError>
-  where
-    Self: Sized;
-
   /**
    * Send a MCP Request and wait for its response. This method will ignore all non-relevent messages for now.
    */
   fn send_and_wait_for_response(&mut self, request: MCPRequest) -> Result<MCPResponse, NahError>;
+
+  /**
+   * Kill the connection with the MCP server and try to release the resource.
+   */
+  fn kill(&mut self) -> std::io::Result<()>;
+
+  /**
+   * Fetch the list of tools from the MCP Server.
+   */
+  fn fetch_tools(&mut self) -> Result<Vec<&MCPToolDefinition>, NahError>;
+
+  /**
+   * Call the tool and wait for the response. Return value is the result object.
+   */
+  fn call_tool(&mut self, tool_name: &str, args: &Value) -> Result<Value, NahError>;
+
+  /**
+   * Get the definition of a given tool name. It may try to read the tool from cached results.
+   */
+  fn get_tool_definition(&mut self, tool_name: &str) -> Result<&MCPToolDefinition, NahError>;
+
+  /**
+   * Fetch the list of available resources.
+   */
+  fn fetch_resources_list(&mut self) -> Result<Vec<&MCPResourceDefinition>, NahError>;
+
+  /**
+   * Fetch the list of resource templates.
+   */
+  fn fetch_resource_templates_list(&mut self) -> Result<Vec<MCPResourceDefinition>, NahError>;
+
+  /**
+   * Get the definiton of a given resource URI.
+   */
+  fn get_resources_definition(&mut self, uri: &str) -> Result<&MCPResourceDefinition, NahError>;
+
+  /**
+   * Set timeout for waiting for a response.
+   */
+  fn set_timeout(&mut self, timeout_ms: u64);
+
+  /**
+   * Read the content of a resource URI.
+   */
+  fn read_resources(&mut self, uri: &str) -> Result<Vec<MCPResourceContent>, NahError>;
+
+  /**
+   * Fetch the list of promptss from the MCP Server.
+   */
+  fn fetch_prompts_list(&mut self) -> Result<Vec<&MCPPromptDefinition>, NahError>;
+
+  /**
+   * Get the definition of a given prompt name. It may try to read the prompt from cached results.
+   */
+  fn get_prompt_definition(&mut self, prompt_name: &str) -> Result<&MCPPromptDefinition, NahError>;
+
+  /**
+   * Get the prompt content through a given prompt name and arguments.
+   */
+  fn get_prompt_content(
+    &mut self,
+    prompt_name: &str,
+    args: &HashMap<String, String>,
+  ) -> Result<MCPPromptResult, NahError>;
 }
 
 /**
@@ -72,9 +123,310 @@ pub struct MCPLocalServerProcess {
 }
 
 impl MCPServer for MCPLocalServerProcess {
-  type ConfigType = MCPLocalServerCommand;
+  fn send_and_wait_for_response(&mut self, request: MCPRequest) -> Result<MCPResponse, NahError> {
+    let id = request.id.clone();
+    self.send_data(request)?;
+    let mut buf = String::new();
+    loop {
+      let incoming_msg = self.receive_data::<Value>(&mut buf)?;
+      let incoming_obj = incoming_msg.as_object();
+      if incoming_obj.is_none() {
+        continue;
+      }
+      let incoming_data = incoming_obj.unwrap();
+      match incoming_data.get("id").and_then(|v| v.as_str()) {
+        None => {
+          // Try to unpack the message as a notification
+          match serde_json::from_value::<MCPNotification>(incoming_msg) {
+            Ok(notif) => {
+              self.process_notification(notif);
+            }
+            _ => {
+              // Unknown message. Ignore it for now.
+            }
+          }
+        }
+        Some(incoming_id) => {
+          if incoming_id == id {
+            return match serde_json::from_value::<MCPResponse>(incoming_msg) {
+              Ok(resp) => Ok(resp),
+              Err(_e) => Err(NahError::mcp_server_invalid_response(&self.server_name)),
+            };
+          }
+        }
+      }
+    }
+  }
 
-  fn start_and_init(
+  fn kill(&mut self) -> std::io::Result<()> {
+    let _ = self.history_file.flush();
+    self.process.kill()
+  }
+
+  fn fetch_tools(&mut self) -> Result<Vec<&MCPToolDefinition>, NahError> {
+    let id: String = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::tools_list(&id);
+    let response = self.send_and_wait_for_response(request)?;
+
+    let result = match response.result {
+      None => {
+        return Err(match response.error {
+          None => NahError::mcp_server_communication_error(&self.server_name),
+          Some(err) => NahError::mcp_server_error(
+            &self.server_name,
+            &serde_json::to_string_pretty(&err).unwrap(),
+          ),
+        });
+      }
+      Some(res) => {
+        let tools = match res
+          .as_object()
+          .and_then(|v| v.get("tools"))
+          .and_then(|v| v.as_array())
+        {
+          None => {
+            return Err(NahError::mcp_server_invalid_response(&self.server_name));
+          }
+          Some(t) => t,
+        };
+
+        self.tool_cache.clear();
+        for item in tools.iter() {
+          let tool: MCPToolDefinition = match serde_json::from_value(item.clone()) {
+            Ok(t) => t,
+            Err(_e) => {
+              return Err(NahError::mcp_server_invalid_response(&self.server_name));
+            }
+          };
+          self.tool_cache.insert(tool.name.clone(), tool);
+        }
+        self.tool_cache.values().collect()
+      }
+    };
+    Ok(result)
+  }
+
+  fn call_tool(&mut self, tool_name: &str, args: &Value) -> Result<Value, NahError> {
+    let id: String = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::tools_call(&id, tool_name, args);
+    let response = self.send_and_wait_for_response(request)?;
+
+    match response.result {
+      Some(r) => Ok(r),
+      None => Err(self.parse_response_error(&response)),
+    }
+  }
+
+  fn get_tool_definition(&mut self, tool_name: &str) -> Result<&MCPToolDefinition, NahError> {
+    if self.tool_cache.contains_key(tool_name) {
+      Ok(self.tool_cache.get(tool_name).unwrap())
+    } else {
+      // re-fetch tool list
+      self.fetch_tools()?;
+      match self.tool_cache.get(tool_name) {
+        Some(p) => Ok(p),
+        None => Err(NahError::invalid_value(&format!(
+          "Invalid tool name: {}",
+          tool_name
+        ))),
+      }
+    }
+  }
+
+  fn fetch_resources_list(&mut self) -> Result<Vec<&MCPResourceDefinition>, NahError> {
+    let id: String = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::resources_list(&id);
+    let response = self.send_and_wait_for_response(request)?;
+    match response.result {
+      Some(res) => {
+        let resources = res
+          .as_object()
+          .and_then(|obj| obj.get("resources"))
+          .and_then(|v| v.as_array());
+        if resources.is_none() {
+          return Err(NahError::mcp_server_invalid_response(&self.server_name));
+        }
+        let result: Vec<MCPResourceDefinition> = resources
+          .unwrap()
+          .iter()
+          .map(|v| serde_json::from_value::<MCPResourceDefinition>(v.clone()))
+          .filter_map(|r| match r {
+            Ok(v) => Some(v),
+            Err(_) => None,
+          })
+          .collect();
+        self.resource_cache.clear();
+        for item in result.into_iter() {
+          self.resource_cache.insert(item.name.clone(), item);
+        }
+        Ok(self.resource_cache.values().collect())
+      }
+      None => Err(self.parse_response_error(&response)),
+    }
+  }
+
+  fn fetch_resource_templates_list(&mut self) -> Result<Vec<MCPResourceDefinition>, NahError> {
+    let id: String = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::resource_templates_list(&id);
+    let response = self.send_and_wait_for_response(request)?;
+    match response.result {
+      Some(res) => {
+        let resources = res
+          .as_object()
+          .and_then(|obj| obj.get("resourceTemplates"))
+          .and_then(|v: &Value| v.as_array());
+        if resources.is_none() {
+          return Err(NahError::mcp_server_invalid_response(&self.server_name));
+        }
+        let result: Vec<MCPResourceDefinition> = resources
+          .unwrap()
+          .iter()
+          .map(|v| serde_json::from_value::<MCPResourceDefinition>(v.clone()))
+          .filter_map(|r| match r {
+            Ok(v) => Some(v),
+            Err(_) => None,
+          })
+          .collect();
+        Ok(result)
+      }
+      None => Err(self.parse_response_error(&response)),
+    }
+  }
+
+  fn get_resources_definition(&mut self, uri: &str) -> Result<&MCPResourceDefinition, NahError> {
+    if self.resource_cache.contains_key(uri) {
+      Ok(self.resource_cache.get(uri).unwrap())
+    } else {
+      self.fetch_resources_list()?;
+      match self.resource_cache.get(uri) {
+        Some(p) => Ok(p),
+        None => Err(NahError::invalid_value(&format!(
+          "Invalid resource uri: {}",
+          uri
+        ))),
+      }
+    }
+  }
+
+  fn read_resources(&mut self, uri: &str) -> Result<Vec<MCPResourceContent>, NahError> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::resources_read(&id, uri);
+    let response = self.send_and_wait_for_response(request)?;
+    let contents = match response
+      .result
+      .as_ref()
+      .and_then(|result| result.as_object())
+      .and_then(|result_obj| result_obj.get("contents"))
+      .and_then(|contents| contents.as_array())
+    {
+      Some(r) => r,
+      None => return Err(self.parse_response_error(&response)),
+    };
+
+    Ok(
+      contents
+        .iter()
+        .map(|v| serde_json::from_value::<MCPResourceContent>(v.clone()))
+        .filter_map(|v| match v {
+          Ok(r) => {
+            if r.text.is_none() && r.blob.is_none() {
+              None
+            } else {
+              Some(r)
+            }
+          }
+          Err(_) => None,
+        })
+        .collect(),
+    )
+  }
+
+  fn set_timeout(&mut self, timeout_ms: u64) {
+    self.timeout_ms = timeout_ms;
+  }
+
+  fn fetch_prompts_list(&mut self) -> Result<Vec<&MCPPromptDefinition>, NahError> {
+    let id: String = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::prompts_list(&id);
+    let response = self.send_and_wait_for_response(request)?;
+
+    let result = match response.result {
+      None => {
+        return Err(match response.error {
+          None => NahError::mcp_server_communication_error(&self.server_name),
+          Some(err) => NahError::mcp_server_error(
+            &self.server_name,
+            &serde_json::to_string_pretty(&err).unwrap(),
+          ),
+        });
+      }
+      Some(res) => {
+        let prompts = match res
+          .as_object()
+          .and_then(|v| v.get("prompts"))
+          .and_then(|v| v.as_array())
+        {
+          None => {
+            return Err(NahError::mcp_server_invalid_response(&self.server_name));
+          }
+          Some(t) => t,
+        };
+
+        self.prompt_cache.clear();
+        prompts.iter().for_each(|item| {
+          let _ = serde_json::from_value::<MCPPromptDefinition>(item.clone()).is_ok_and(|v| {
+            self.prompt_cache.insert(v.name.clone(), v);
+            true
+          });
+        });
+
+        self.prompt_cache.values().collect()
+      }
+    };
+    Ok(result)
+  }
+
+  fn get_prompt_definition(&mut self, prompt_name: &str) -> Result<&MCPPromptDefinition, NahError> {
+    if self.prompt_cache.contains_key(prompt_name) {
+      Ok(self.prompt_cache.get(prompt_name).unwrap())
+    } else {
+      // re-fetch tool list
+      self.fetch_prompts_list()?;
+      match self.prompt_cache.get(prompt_name) {
+        Some(p) => Ok(p),
+        None => Err(NahError::invalid_value(&format!(
+          "Invalid prompt name: {}",
+          prompt_name
+        ))),
+      }
+    }
+  }
+
+  fn get_prompt_content(
+    &mut self,
+    prompt_name: &str,
+    args: &HashMap<String, String>,
+  ) -> Result<MCPPromptResult, NahError> {
+    let id: String = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::get_prompt(
+      &id,
+      prompt_name,
+      args.into_iter().map(|(k, v)| (k.as_str(), v.as_str())),
+    );
+    let response = self.send_and_wait_for_response(request)?;
+
+    match response.result {
+      Some(r) => Ok(serde_json::from_value::<MCPPromptResult>(r).unwrap()),
+      None => Err(self.parse_response_error(&response)),
+    }
+  }
+}
+
+impl MCPLocalServerProcess {
+  /**
+   * Start a MCP local server process.
+   */
+  pub fn start_and_init(
     name: &str,
     mcp_command: &MCPLocalServerCommand,
     history_path: &PathBuf,
@@ -158,53 +510,6 @@ impl MCPServer for MCPLocalServerProcess {
     Ok(result)
   }
 
-  fn send_and_wait_for_response(&mut self, request: MCPRequest) -> Result<MCPResponse, NahError> {
-    let id = request.id.clone();
-    self.send_data(request)?;
-    let mut buf = String::new();
-    loop {
-      let incoming_msg = self.receive_data::<Value>(&mut buf)?;
-      let incoming_obj = incoming_msg.as_object();
-      if incoming_obj.is_none() {
-        continue;
-      }
-      let incoming_data = incoming_obj.unwrap();
-      match incoming_data.get("id").and_then(|v| v.as_str()) {
-        None => {
-          // Try to unpack the message as a notification
-          match serde_json::from_value::<MCPNotification>(incoming_msg) {
-            Ok(notif) => {
-              self.process_notification(notif);
-            }
-            _ => {
-              // Unknown message. Ignore it for now.
-            }
-          }
-        }
-        Some(incoming_id) => {
-          if incoming_id == id {
-            return match serde_json::from_value::<MCPResponse>(incoming_msg) {
-              Ok(resp) => Ok(resp),
-              Err(_e) => Err(NahError::mcp_server_invalid_response(&self.server_name)),
-            };
-          }
-        }
-      }
-    }
-  }
-}
-
-impl MCPLocalServerProcess {
-  /**
-   * Set communication timeout.
-   *
-   * Args:
-   * * timeout_ms: timeout in milliseconds.
-   */
-  pub fn set_timeout(&mut self, timeout_ms: u64) {
-    self.timeout_ms = timeout_ms;
-  }
-
   /**
    * Send a piece of data to the MCP Server.
    */
@@ -276,299 +581,6 @@ impl MCPLocalServerProcess {
   fn process_notification(&mut self, notification: MCPNotification) {
     eprintln!("Received notification, method ={}", notification.method);
     // TODO: process the notification
-  }
-
-  /**
-   * Kill the process.
-   */
-  pub fn kill(&mut self) -> std::io::Result<()> {
-    let _ = self.history_file.flush();
-    self.process.kill()
-  }
-
-  pub fn kill_and_wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
-    let _ = self.kill()?;
-    self.process.wait()
-  }
-
-  /**
-   * Fetch the list of tools from the MCP Server.
-   */
-  pub fn fetch_tools(&mut self) -> Result<Vec<&MCPToolDefinition>, NahError> {
-    let id: String = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::tools_list(&id);
-    let response = self.send_and_wait_for_response(request)?;
-
-    let result = match response.result {
-      None => {
-        return Err(match response.error {
-          None => NahError::mcp_server_communication_error(&self.server_name),
-          Some(err) => NahError::mcp_server_error(
-            &self.server_name,
-            &serde_json::to_string_pretty(&err).unwrap(),
-          ),
-        });
-      }
-      Some(res) => {
-        let tools = match res
-          .as_object()
-          .and_then(|v| v.get("tools"))
-          .and_then(|v| v.as_array())
-        {
-          None => {
-            return Err(NahError::mcp_server_invalid_response(&self.server_name));
-          }
-          Some(t) => t,
-        };
-
-        self.tool_cache.clear();
-        for item in tools.iter() {
-          let tool: MCPToolDefinition = match serde_json::from_value(item.clone()) {
-            Ok(t) => t,
-            Err(_e) => {
-              return Err(NahError::mcp_server_invalid_response(&self.server_name));
-            }
-          };
-          self.tool_cache.insert(tool.name.clone(), tool);
-        }
-        self.tool_cache.values().collect()
-      }
-    };
-    Ok(result)
-  }
-
-  /**
-   * Get the definition of a given tool name. It may try to read the tool from cached results.
-   */
-  pub fn get_tool_definition(&mut self, tool_name: &str) -> Result<&MCPToolDefinition, NahError> {
-    if self.tool_cache.contains_key(tool_name) {
-      Ok(self.tool_cache.get(tool_name).unwrap())
-    } else {
-      // re-fetch tool list
-      self.fetch_tools()?;
-      match self.tool_cache.get(tool_name) {
-        Some(p) => Ok(p),
-        None => Err(NahError::invalid_value(&format!(
-          "Invalid tool name: {}",
-          tool_name
-        ))),
-      }
-    }
-  }
-
-  /**
-   * Call the tool and wait for the response. Return value is the result object.
-   */
-  pub fn call_tool(&mut self, tool_name: &str, args: &Value) -> Result<Value, NahError> {
-    let id: String = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::tools_call(&id, tool_name, args);
-    let response = self.send_and_wait_for_response(request)?;
-
-    match response.result {
-      Some(r) => Ok(r),
-      None => Err(self.parse_response_error(&response)),
-    }
-  }
-
-  /**
-   * Fetch the list of available resources.
-   */
-  pub fn fetch_resources_list(&mut self) -> Result<Vec<&MCPResourceDefinition>, NahError> {
-    let id: String = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::resources_list(&id);
-    let response = self.send_and_wait_for_response(request)?;
-    match response.result {
-      Some(res) => {
-        let resources = res
-          .as_object()
-          .and_then(|obj| obj.get("resources"))
-          .and_then(|v| v.as_array());
-        if resources.is_none() {
-          return Err(NahError::mcp_server_invalid_response(&self.server_name));
-        }
-        let result: Vec<MCPResourceDefinition> = resources
-          .unwrap()
-          .iter()
-          .map(|v| serde_json::from_value::<MCPResourceDefinition>(v.clone()))
-          .filter_map(|r| match r {
-            Ok(v) => Some(v),
-            Err(_) => None,
-          })
-          .collect();
-        self.resource_cache.clear();
-        for item in result.into_iter() {
-          self.resource_cache.insert(item.name.clone(), item);
-        }
-        Ok(self.resource_cache.values().collect())
-      }
-      None => Err(self.parse_response_error(&response)),
-    }
-  }
-
-  pub fn fetch_resource_templates_list(&mut self) -> Result<Vec<MCPResourceDefinition>, NahError> {
-    let id: String = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::resource_templates_list(&id);
-    let response = self.send_and_wait_for_response(request)?;
-    match response.result {
-      Some(res) => {
-        let resources = res
-          .as_object()
-          .and_then(|obj| obj.get("resourceTemplates"))
-          .and_then(|v: &Value| v.as_array());
-        if resources.is_none() {
-          return Err(NahError::mcp_server_invalid_response(&self.server_name));
-        }
-        let result: Vec<MCPResourceDefinition> = resources
-          .unwrap()
-          .iter()
-          .map(|v| serde_json::from_value::<MCPResourceDefinition>(v.clone()))
-          .filter_map(|r| match r {
-            Ok(v) => Some(v),
-            Err(_) => None,
-          })
-          .collect();
-        Ok(result)
-      }
-      None => Err(self.parse_response_error(&response)),
-    }
-  }
-
-  pub fn get_resources_definition(
-    &mut self,
-    uri: &str,
-  ) -> Result<&MCPResourceDefinition, NahError> {
-    if self.resource_cache.contains_key(uri) {
-      Ok(self.resource_cache.get(uri).unwrap())
-    } else {
-      self.fetch_resources_list()?;
-      match self.resource_cache.get(uri) {
-        Some(p) => Ok(p),
-        None => Err(NahError::invalid_value(&format!(
-          "Invalid resource uri: {}",
-          uri
-        ))),
-      }
-    }
-  }
-
-  pub fn read_resources(&mut self, uri: &str) -> Result<Vec<MCPResourceContent>, NahError> {
-    let id = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::resources_read(&id, uri);
-    let response = self.send_and_wait_for_response(request)?;
-    let contents = match response
-      .result
-      .as_ref()
-      .and_then(|result| result.as_object())
-      .and_then(|result_obj| result_obj.get("contents"))
-      .and_then(|contents| contents.as_array())
-    {
-      Some(r) => r,
-      None => return Err(self.parse_response_error(&response)),
-    };
-
-    Ok(
-      contents
-        .iter()
-        .map(|v| serde_json::from_value::<MCPResourceContent>(v.clone()))
-        .filter_map(|v| match v {
-          Ok(r) => {
-            if r.text.is_none() && r.blob.is_none() {
-              None
-            } else {
-              Some(r)
-            }
-          }
-          Err(_) => None,
-        })
-        .collect(),
-    )
-  }
-
-  /**
-   * Fetch the list of promptss from the MCP Server.
-   */
-  pub fn fetch_prompts_list(&mut self) -> Result<Vec<&MCPPromptDefinition>, NahError> {
-    let id: String = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::prompts_list(&id);
-    let response = self.send_and_wait_for_response(request)?;
-
-    let result = match response.result {
-      None => {
-        return Err(match response.error {
-          None => NahError::mcp_server_communication_error(&self.server_name),
-          Some(err) => NahError::mcp_server_error(
-            &self.server_name,
-            &serde_json::to_string_pretty(&err).unwrap(),
-          ),
-        });
-      }
-      Some(res) => {
-        let prompts = match res
-          .as_object()
-          .and_then(|v| v.get("prompts"))
-          .and_then(|v| v.as_array())
-        {
-          None => {
-            return Err(NahError::mcp_server_invalid_response(&self.server_name));
-          }
-          Some(t) => t,
-        };
-
-        self.prompt_cache.clear();
-        prompts.iter().for_each(|item| {
-          let _ = serde_json::from_value::<MCPPromptDefinition>(item.clone()).is_ok_and(|v| {
-            self.prompt_cache.insert(v.name.clone(), v);
-            true
-          });
-        });
-
-        self.prompt_cache.values().collect()
-      }
-    };
-    Ok(result)
-  }
-
-  /**
-   * Get the definition of a given prompt name. It may try to read the prompt from cached results.
-   */
-  pub fn get_prompt_definition(
-    &mut self,
-    prompt_name: &str,
-  ) -> Result<&MCPPromptDefinition, NahError> {
-    if self.prompt_cache.contains_key(prompt_name) {
-      Ok(self.prompt_cache.get(prompt_name).unwrap())
-    } else {
-      // re-fetch tool list
-      self.fetch_prompts_list()?;
-      match self.prompt_cache.get(prompt_name) {
-        Some(p) => Ok(p),
-        None => Err(NahError::invalid_value(&format!(
-          "Invalid prompt name: {}",
-          prompt_name
-        ))),
-      }
-    }
-  }
-
-  /**
-   * Get the prompt content through a given prompt name and arguments.
-   */
-  pub fn get_prompt_content<'a, I>(
-    &mut self,
-    prompt_name: &str,
-    args: I,
-  ) -> Result<MCPPromptResult, NahError>
-  where
-    I: Iterator<Item = (&'a str, &'a str)>,
-  {
-    let id: String = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::get_prompt(&id, prompt_name, args);
-    let response = self.send_and_wait_for_response(request)?;
-
-    match response.result {
-      Some(r) => Ok(serde_json::from_value::<MCPPromptResult>(r).unwrap()),
-      None => Err(self.parse_response_error(&response)),
-    }
   }
 
   fn parse_response_error(&self, response: &MCPResponse) -> NahError {

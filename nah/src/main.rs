@@ -31,7 +31,7 @@ struct Cli {
  * Global context for nah app.
  */
 struct AppContext {
-  pub server_processes: HashMap<String, MCPLocalServerProcess>,
+  pub server_processes: HashMap<String, Box<dyn MCPServer>>,
   pub current_server: Option<String>,
   pub history_path: PathBuf,
   pub server_commands: HashMap<String, MCPLocalServerCommand>,
@@ -99,7 +99,7 @@ fn main() {
 
     context
       .server_processes
-      .insert(server_name.to_owned(), process);
+      .insert(server_name.to_owned(), Box::new(process));
   }
   println!("Remote server: {:?}", data.mcp_remote_servers);
 
@@ -246,9 +246,9 @@ MCP server of `server_name` will be restarted. If no `server_name` is provided, 
 
     let old_process = self
       .server_processes
-      .insert(server_name.to_owned(), process);
+      .insert(server_name.to_owned(), Box::new(process));
 
-    let _ = old_process.is_some_and(|mut p| p.kill_and_wait().is_ok());
+    let _ = old_process.is_some_and(|mut p| p.kill().is_ok());
   }
 
   fn process_list_tools(&mut self) {
@@ -555,10 +555,10 @@ MCP server of `server_name` will be restarted. If no `server_name` is provided, 
                   },
                   Ok(v) => v
                 };
-                let args_iter = arguments.iter().map(|(k, v)| {
-                  (k.as_str(), v.as_str().unwrap_or(""))
-                });
-                let result = server_process.get_prompt_content(prompt_name, args_iter);
+                let args_map = arguments.iter().map(|(k, v)| {
+                  (k.to_owned(), v.as_str().unwrap_or("").to_owned())
+                }).collect();
+                let result = server_process.get_prompt_content(prompt_name, &args_map);
                 match result {
                   Err(e) => {
                     println!("Received error: {}", e);
@@ -615,7 +615,7 @@ MCP server of `server_name` will be restarted. If no `server_name` is provided, 
    */
   fn process_with_current_server<F>(&mut self, f: F)
   where
-    F: Fn(&str, &mut MCPLocalServerProcess),
+    F: Fn(&str, &mut Box<dyn MCPServer>),
   {
     match &self.current_server {
       Some(server_name) => {

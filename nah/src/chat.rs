@@ -8,7 +8,6 @@ use std::time::SystemTime;
 use crate::editor::launch_editor;
 use crate::types::NahError;
 use crate::AppContext;
-use crate::MCPLocalServerProcess;
 use crate::ModelConfig;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -265,7 +264,7 @@ impl ChatContext {
         let tool_name = name_parts[1];
         let args: Value = serde_json::from_str(&item.function.arguments).unwrap();
 
-        let server: &mut MCPLocalServerProcess = app.server_processes.get_mut(server_name).unwrap();
+        let server = app.server_processes.get_mut(server_name).unwrap();
         let tool_result = server.call_tool(&tool_name, &args)?;
         let text_content = unpack_mcp_text_contents(server_name, &tool_result)?;
         println!("[Tool: {}]: {}", server_name, text_content);
