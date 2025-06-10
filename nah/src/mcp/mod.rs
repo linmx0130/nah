@@ -25,24 +25,74 @@ pub trait MCPServer {
   fn send_and_wait_for_response(&mut self, request: MCPRequest) -> Result<MCPResponse, NahError>;
 
   /**
+   * Get the name of this server.
+   */
+  fn get_server_name(&self) -> &str;
+
+  /**
    * Kill the connection with the MCP server and try to release the resource.
    */
   fn kill(&mut self) -> std::io::Result<()>;
 
   /**
+   * Return a reference to the tool definiton map
+   */
+  fn _get_tool_map<'a>(&'a self) -> &'a HashMap<String, MCPToolDefinition>;
+
+  /**
+   * Set the tool definition map to a new value.
+   */
+  fn _set_tool_map(&mut self, data: HashMap<String, MCPToolDefinition>);
+
+  /**
    * Fetch the list of tools from the MCP Server.
    */
-  fn fetch_tools(&mut self) -> Result<Vec<&MCPToolDefinition>, NahError>;
+  fn fetch_tools(&mut self) -> Result<Vec<&MCPToolDefinition>, NahError> {
+    let id: String = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::tools_list(&id);
+    let response = self.send_and_wait_for_response(request)?;
+
+    let tool_list = parse_tools_list_from_response(self.get_server_name(), response)?;
+    let mut tool_map = HashMap::new();
+    for item in tool_list {
+      tool_map.insert(item.name.to_owned(), item);
+    }
+    self._set_tool_map(tool_map);
+    Ok(self._get_tool_map().values().collect())
+  }
 
   /**
    * Call the tool and wait for the response. Return value is the result object.
    */
-  fn call_tool(&mut self, tool_name: &str, args: &Value) -> Result<Value, NahError>;
+  fn call_tool(&mut self, tool_name: &str, args: &Value) -> Result<Value, NahError> {
+    let id: String = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::tools_call(&id, tool_name, args);
+    let response = self.send_and_wait_for_response(request)?;
+
+    match response.result {
+      Some(r) => Ok(r),
+      None => Err(self.parse_response_error(&response)),
+    }
+  }
 
   /**
    * Get the definition of a given tool name. It may try to read the tool from cached results.
    */
-  fn get_tool_definition(&mut self, tool_name: &str) -> Result<&MCPToolDefinition, NahError>;
+  fn get_tool_definition(&mut self, tool_name: &str) -> Result<&MCPToolDefinition, NahError> {
+    if self._get_tool_map().contains_key(tool_name) {
+      Ok(self._get_tool_map().get(tool_name).unwrap())
+    } else {
+      // re-fetch tool list
+      self.fetch_tools()?;
+      match self._get_tool_map().get(tool_name) {
+        Some(p) => Ok(p),
+        None => Err(NahError::invalid_value(&format!(
+          "Invalid tool name: {}",
+          tool_name
+        ))),
+      }
+    }
+  }
 
   /**
    * Fetch the list of available resources.
@@ -87,6 +137,15 @@ pub trait MCPServer {
     prompt_name: &str,
     args: &HashMap<String, String>,
   ) -> Result<MCPPromptResult, NahError>;
+
+  fn parse_response_error(&self, response: &MCPResponse) -> NahError {
+    match &response.error {
+      Some(e) => {
+        NahError::mcp_server_error(self.get_server_name(), &serde_json::to_string(e).unwrap())
+      }
+      None => NahError::mcp_server_error(self.get_server_name(), "unknown error"),
+    }
+  }
 }
 
 pub(in crate::mcp) fn parse_tools_list_from_response(

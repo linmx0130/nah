@@ -82,46 +82,6 @@ impl MCPServer for MCPLocalServerProcess {
     self.process.kill()
   }
 
-  fn fetch_tools(&mut self) -> Result<Vec<&MCPToolDefinition>, NahError> {
-    let id: String = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::tools_list(&id);
-    let response = self.send_and_wait_for_response(request)?;
-
-    let tool_list = parse_tools_list_from_response(&self.server_name, response)?;
-    self.tool_cache.clear();
-    for item in tool_list {
-      self.tool_cache.insert(item.name.to_owned(), item);
-    }
-    Ok(self.tool_cache.values().collect())
-  }
-
-  fn call_tool(&mut self, tool_name: &str, args: &Value) -> Result<Value, NahError> {
-    let id: String = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::tools_call(&id, tool_name, args);
-    let response = self.send_and_wait_for_response(request)?;
-
-    match response.result {
-      Some(r) => Ok(r),
-      None => Err(self.parse_response_error(&response)),
-    }
-  }
-
-  fn get_tool_definition(&mut self, tool_name: &str) -> Result<&MCPToolDefinition, NahError> {
-    if self.tool_cache.contains_key(tool_name) {
-      Ok(self.tool_cache.get(tool_name).unwrap())
-    } else {
-      // re-fetch tool list
-      self.fetch_tools()?;
-      match self.tool_cache.get(tool_name) {
-        Some(p) => Ok(p),
-        None => Err(NahError::invalid_value(&format!(
-          "Invalid tool name: {}",
-          tool_name
-        ))),
-      }
-    }
-  }
-
   fn fetch_resources_list(&mut self) -> Result<Vec<&MCPResourceDefinition>, NahError> {
     let id: String = uuid::Uuid::new_v4().to_string();
     let request = MCPRequest::resources_list(&id);
@@ -309,6 +269,18 @@ impl MCPServer for MCPLocalServerProcess {
       None => Err(self.parse_response_error(&response)),
     }
   }
+
+  fn get_server_name(&self) -> &str {
+    &self.server_name
+  }
+
+  fn _get_tool_map<'a>(&'a self) -> &'a HashMap<String, MCPToolDefinition> {
+    &self.tool_cache
+  }
+
+  fn _set_tool_map(&mut self, data: HashMap<String, MCPToolDefinition>) {
+    self.tool_cache = data;
+  }
 }
 
 impl MCPLocalServerProcess {
@@ -470,12 +442,5 @@ impl MCPLocalServerProcess {
   fn process_notification(&mut self, notification: MCPNotification) {
     eprintln!("Received notification, method ={}", notification.method);
     // TODO: process the notification
-  }
-
-  fn parse_response_error(&self, response: &MCPResponse) -> NahError {
-    match &response.error {
-      Some(e) => NahError::mcp_server_error(&self.server_name, &serde_json::to_string(e).unwrap()),
-      None => NahError::mcp_server_error(&self.server_name, "unknown error"),
-    }
   }
 }
