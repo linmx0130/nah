@@ -1,11 +1,8 @@
-use crate::{
-  mcp::{parse_tools_list_from_response, MCPServer},
-  types::NahError,
-};
+use crate::{mcp::MCPServer, types::NahError};
 use nah_mcp_types::{request::MCPRequest, MCPResponse, MCPToolDefinition};
 use reqwest::Client;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 use tokio::runtime::{Builder, Runtime};
 
 #[derive(Debug, Deserialize)]
@@ -26,7 +23,7 @@ pub struct MCPHTTPServerConnection {
 impl MCPServer for MCPHTTPServerConnection {
   fn send_and_wait_for_response(
     &mut self,
-    request: nah_mcp_types::request::MCPRequest,
+    request: MCPRequest,
   ) -> Result<nah_mcp_types::MCPResponse, crate::types::NahError> {
     let id = request.id.clone();
     let data_str = serde_json::to_string(&request).unwrap();
@@ -79,7 +76,10 @@ impl MCPServer for MCPHTTPServerConnection {
   }
 
   fn set_timeout(&mut self, timeout_ms: u64) {
-    todo!()
+    self.http_client = Client::builder()
+      .timeout(Duration::from_millis(timeout_ms))
+      .build()
+      .unwrap();
   }
 
   fn read_resources(
