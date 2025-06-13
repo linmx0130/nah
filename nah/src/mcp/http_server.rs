@@ -1,5 +1,5 @@
 use crate::{mcp::MCPServer, types::NahError};
-use nah_mcp_types::{request::MCPRequest, MCPResponse, MCPToolDefinition};
+use nah_mcp_types::{request::MCPRequest, MCPResourceDefinition, MCPResponse, MCPToolDefinition};
 use reqwest::Client;
 use serde::Deserialize;
 use std::{collections::HashMap, time::Duration};
@@ -18,6 +18,7 @@ pub struct MCPHTTPServerConnection {
   tokio_runtime: Runtime,
   http_client: Client,
   tool_cache: HashMap<String, MCPToolDefinition>,
+  resource_cache: HashMap<String, MCPResourceDefinition>,
 }
 
 impl MCPServer for MCPHTTPServerConnection {
@@ -54,18 +55,6 @@ impl MCPServer for MCPHTTPServerConnection {
 
   fn kill(&mut self) -> std::io::Result<()> {
     Ok(())
-  }
-
-  fn fetch_resources_list(
-    &mut self,
-  ) -> Result<Vec<&nah_mcp_types::MCPResourceDefinition>, crate::types::NahError> {
-    todo!()
-  }
-
-  fn fetch_resource_templates_list(
-    &mut self,
-  ) -> Result<Vec<nah_mcp_types::MCPResourceDefinition>, crate::types::NahError> {
-    todo!()
   }
 
   fn get_resources_definition(
@@ -121,6 +110,14 @@ impl MCPServer for MCPHTTPServerConnection {
   fn _set_tool_map(&mut self, data: HashMap<String, MCPToolDefinition>) {
     self.tool_cache = data;
   }
+
+  fn _get_resource_map<'a>(&'a self) -> &'a HashMap<String, MCPResourceDefinition> {
+    &self.resource_cache
+  }
+
+  fn _set_resource_map(&mut self, data: HashMap<String, MCPResourceDefinition>) {
+    self.resource_cache = data;
+  }
 }
 
 impl MCPHTTPServerConnection {
@@ -144,6 +141,7 @@ impl MCPHTTPServerConnection {
       tokio_runtime: tokio_runtime,
       http_client: Client::new(),
       tool_cache: HashMap::new(),
+      resource_cache: HashMap::new(),
     })
   }
 }

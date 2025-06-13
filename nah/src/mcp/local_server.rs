@@ -82,66 +82,6 @@ impl MCPServer for MCPLocalServerProcess {
     self.process.kill()
   }
 
-  fn fetch_resources_list(&mut self) -> Result<Vec<&MCPResourceDefinition>, NahError> {
-    let id: String = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::resources_list(&id);
-    let response = self.send_and_wait_for_response(request)?;
-    match response.result {
-      Some(res) => {
-        let resources = res
-          .as_object()
-          .and_then(|obj| obj.get("resources"))
-          .and_then(|v| v.as_array());
-        if resources.is_none() {
-          return Err(NahError::mcp_server_invalid_response(&self.server_name));
-        }
-        let result: Vec<MCPResourceDefinition> = resources
-          .unwrap()
-          .iter()
-          .map(|v| serde_json::from_value::<MCPResourceDefinition>(v.clone()))
-          .filter_map(|r| match r {
-            Ok(v) => Some(v),
-            Err(_) => None,
-          })
-          .collect();
-        self.resource_cache.clear();
-        for item in result.into_iter() {
-          self.resource_cache.insert(item.name.clone(), item);
-        }
-        Ok(self.resource_cache.values().collect())
-      }
-      None => Err(self.parse_response_error(&response)),
-    }
-  }
-
-  fn fetch_resource_templates_list(&mut self) -> Result<Vec<MCPResourceDefinition>, NahError> {
-    let id: String = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::resource_templates_list(&id);
-    let response = self.send_and_wait_for_response(request)?;
-    match response.result {
-      Some(res) => {
-        let resources = res
-          .as_object()
-          .and_then(|obj| obj.get("resourceTemplates"))
-          .and_then(|v: &Value| v.as_array());
-        if resources.is_none() {
-          return Err(NahError::mcp_server_invalid_response(&self.server_name));
-        }
-        let result: Vec<MCPResourceDefinition> = resources
-          .unwrap()
-          .iter()
-          .map(|v| serde_json::from_value::<MCPResourceDefinition>(v.clone()))
-          .filter_map(|r| match r {
-            Ok(v) => Some(v),
-            Err(_) => None,
-          })
-          .collect();
-        Ok(result)
-      }
-      None => Err(self.parse_response_error(&response)),
-    }
-  }
-
   fn get_resources_definition(&mut self, uri: &str) -> Result<&MCPResourceDefinition, NahError> {
     if self.resource_cache.contains_key(uri) {
       Ok(self.resource_cache.get(uri).unwrap())
@@ -280,6 +220,14 @@ impl MCPServer for MCPLocalServerProcess {
 
   fn _set_tool_map(&mut self, data: HashMap<String, MCPToolDefinition>) {
     self.tool_cache = data;
+  }
+
+  fn _get_resource_map<'a>(&'a self) -> &'a HashMap<String, MCPResourceDefinition> {
+    &self.resource_cache
+  }
+
+  fn _set_resource_map(&mut self, data: HashMap<String, MCPResourceDefinition>) {
+    self.resource_cache = data;
   }
 }
 

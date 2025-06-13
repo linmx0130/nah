@@ -45,6 +45,16 @@ pub trait MCPServer {
   fn _set_tool_map(&mut self, data: HashMap<String, MCPToolDefinition>);
 
   /**
+   * Return a reference to the resource definition map.
+   */
+  fn _get_resource_map<'a>(&'a self) -> &'a HashMap<String, MCPResourceDefinition>;
+
+  /**
+   * Set the resource definition map to a new value.
+   */
+  fn _set_resource_map(&mut self, data: HashMap<String, MCPResourceDefinition>);
+
+  /**
    * Fetch the list of tools from the MCP Server.
    */
   fn fetch_tools(&mut self) -> Result<Vec<&MCPToolDefinition>, NahError> {
@@ -97,12 +107,72 @@ pub trait MCPServer {
   /**
    * Fetch the list of available resources.
    */
-  fn fetch_resources_list(&mut self) -> Result<Vec<&MCPResourceDefinition>, NahError>;
+  fn fetch_resources_list(&mut self) -> Result<Vec<&MCPResourceDefinition>, NahError> {
+    let id: String = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::resources_list(&id);
+    let response = self.send_and_wait_for_response(request)?;
+    match response.result {
+      Some(res) => {
+        let resources = res
+          .as_object()
+          .and_then(|obj| obj.get("resources"))
+          .and_then(|v| v.as_array());
+        if resources.is_none() {
+          return Err(NahError::mcp_server_invalid_response(
+            self.get_server_name(),
+          ));
+        }
+        let mut resource_map = HashMap::new();
+        resources
+          .unwrap()
+          .iter()
+          .map(|v| serde_json::from_value::<MCPResourceDefinition>(v.clone()))
+          .filter_map(|r| match r {
+            Ok(v) => Some(v),
+            Err(_) => None,
+          })
+          .for_each(|v| {
+            resource_map.insert(v.name.to_owned(), v);
+          });
+        self._set_resource_map(resource_map);
+        Ok(self._get_resource_map().values().collect())
+      }
+      None => Err(self.parse_response_error(&response)),
+    }
+  }
 
   /**
    * Fetch the list of resource templates.
    */
-  fn fetch_resource_templates_list(&mut self) -> Result<Vec<MCPResourceDefinition>, NahError>;
+  fn fetch_resource_templates_list(&mut self) -> Result<Vec<MCPResourceDefinition>, NahError> {
+    let id: String = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::resource_templates_list(&id);
+    let response = self.send_and_wait_for_response(request)?;
+    match response.result {
+      Some(res) => {
+        let resources = res
+          .as_object()
+          .and_then(|obj| obj.get("resourceTemplates"))
+          .and_then(|v: &Value| v.as_array());
+        if resources.is_none() {
+          return Err(NahError::mcp_server_invalid_response(
+            self.get_server_name(),
+          ));
+        }
+        let result: Vec<MCPResourceDefinition> = resources
+          .unwrap()
+          .iter()
+          .map(|v| serde_json::from_value::<MCPResourceDefinition>(v.clone()))
+          .filter_map(|r| match r {
+            Ok(v) => Some(v),
+            Err(_) => None,
+          })
+          .collect();
+        Ok(result)
+      }
+      None => Err(self.parse_response_error(&response)),
+    }
+  }
 
   /**
    * Get the definiton of a given resource URI.
