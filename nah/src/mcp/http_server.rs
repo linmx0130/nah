@@ -1,5 +1,7 @@
 use crate::{mcp::MCPServer, types::NahError};
-use nah_mcp_types::{request::MCPRequest, MCPResourceDefinition, MCPResponse, MCPToolDefinition};
+use nah_mcp_types::{
+  request::MCPRequest, MCPPromptDefinition, MCPResourceDefinition, MCPResponse, MCPToolDefinition,
+};
 use reqwest::Client;
 use serde::Deserialize;
 use std::{collections::HashMap, time::Duration};
@@ -19,6 +21,7 @@ pub struct MCPHTTPServerConnection {
   http_client: Client,
   tool_cache: HashMap<String, MCPToolDefinition>,
   resource_cache: HashMap<String, MCPResourceDefinition>,
+  prompt_cache: HashMap<String, MCPPromptDefinition>,
 }
 
 impl MCPServer for MCPHTTPServerConnection {
@@ -26,7 +29,6 @@ impl MCPServer for MCPHTTPServerConnection {
     &mut self,
     request: MCPRequest,
   ) -> Result<nah_mcp_types::MCPResponse, crate::types::NahError> {
-    let id = request.id.clone();
     let data_str = serde_json::to_string(&request).unwrap();
     let mut req = self.http_client.post(self.url.to_owned());
     for (k, v) in self.headers.iter() {
@@ -57,46 +59,11 @@ impl MCPServer for MCPHTTPServerConnection {
     Ok(())
   }
 
-  fn get_resources_definition(
-    &mut self,
-    uri: &str,
-  ) -> Result<&nah_mcp_types::MCPResourceDefinition, crate::types::NahError> {
-    todo!()
-  }
-
   fn set_timeout(&mut self, timeout_ms: u64) {
     self.http_client = Client::builder()
       .timeout(Duration::from_millis(timeout_ms))
       .build()
       .unwrap();
-  }
-
-  fn read_resources(
-    &mut self,
-    uri: &str,
-  ) -> Result<Vec<nah_mcp_types::MCPResourceContent>, crate::types::NahError> {
-    todo!()
-  }
-
-  fn fetch_prompts_list(
-    &mut self,
-  ) -> Result<Vec<&nah_mcp_types::MCPPromptDefinition>, crate::types::NahError> {
-    todo!()
-  }
-
-  fn get_prompt_definition(
-    &mut self,
-    prompt_name: &str,
-  ) -> Result<&nah_mcp_types::MCPPromptDefinition, crate::types::NahError> {
-    todo!()
-  }
-
-  fn get_prompt_content(
-    &mut self,
-    prompt_name: &str,
-    args: &HashMap<String, String>,
-  ) -> Result<nah_mcp_types::MCPPromptResult, crate::types::NahError> {
-    todo!()
   }
 
   fn get_server_name(&self) -> &str {
@@ -117,6 +84,14 @@ impl MCPServer for MCPHTTPServerConnection {
 
   fn _set_resource_map(&mut self, data: HashMap<String, MCPResourceDefinition>) {
     self.resource_cache = data;
+  }
+
+  fn _get_prompt_map<'a>(&'a self) -> &'a HashMap<String, MCPPromptDefinition> {
+    &self.prompt_cache
+  }
+
+  fn _set_prompt_map(&mut self, data: HashMap<String, MCPPromptDefinition>) {
+    self.prompt_cache = data;
   }
 }
 
@@ -142,6 +117,7 @@ impl MCPHTTPServerConnection {
       http_client: Client::new(),
       tool_cache: HashMap::new(),
       resource_cache: HashMap::new(),
+      prompt_cache: HashMap::new(),
     })
   }
 }

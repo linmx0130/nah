@@ -55,6 +55,16 @@ pub trait MCPServer {
   fn _set_resource_map(&mut self, data: HashMap<String, MCPResourceDefinition>);
 
   /**
+   * Return a reference to the prompt definition map.
+   */
+  fn _get_prompt_map<'a>(&'a self) -> &'a HashMap<String, MCPPromptDefinition>;
+
+  /**
+   * Set the prompt definition map to a new value.
+   */
+  fn _set_prompt_map(&mut self, data: HashMap<String, MCPPromptDefinition>);
+
+  /**
    * Fetch the list of tools from the MCP Server.
    */
   fn fetch_tools(&mut self) -> Result<Vec<&MCPToolDefinition>, NahError> {
@@ -177,28 +187,122 @@ pub trait MCPServer {
   /**
    * Get the definiton of a given resource URI.
    */
-  fn get_resources_definition(&mut self, uri: &str) -> Result<&MCPResourceDefinition, NahError>;
-
-  /**
-   * Set timeout for waiting for a response.
-   */
-  fn set_timeout(&mut self, timeout_ms: u64);
+  fn get_resources_definition(&mut self, uri: &str) -> Result<&MCPResourceDefinition, NahError> {
+    if self._get_resource_map().contains_key(uri) {
+      Ok(self._get_resource_map().get(uri).unwrap())
+    } else {
+      self.fetch_resources_list()?;
+      match self._get_resource_map().get(uri) {
+        Some(p) => Ok(p),
+        None => Err(NahError::invalid_value(&format!(
+          "Invalid resource uri: {}",
+          uri
+        ))),
+      }
+    }
+  }
 
   /**
    * Read the content of a resource URI.
    */
-  fn read_resources(&mut self, uri: &str) -> Result<Vec<MCPResourceContent>, NahError>;
+  fn read_resources(&mut self, uri: &str) -> Result<Vec<MCPResourceContent>, NahError> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::resources_read(&id, uri);
+    let response = self.send_and_wait_for_response(request)?;
+    let contents = match response
+      .result
+      .as_ref()
+      .and_then(|result| result.as_object())
+      .and_then(|result_obj| result_obj.get("contents"))
+      .and_then(|contents| contents.as_array())
+    {
+      Some(r) => r,
+      None => return Err(self.parse_response_error(&response)),
+    };
+
+    Ok(
+      contents
+        .iter()
+        .map(|v| serde_json::from_value::<MCPResourceContent>(v.clone()))
+        .filter_map(|v| match v {
+          Ok(r) => {
+            if r.text.is_none() && r.blob.is_none() {
+              None
+            } else {
+              Some(r)
+            }
+          }
+          Err(_) => None,
+        })
+        .collect(),
+    )
+  }
 
   /**
    * Fetch the list of promptss from the MCP Server.
    */
-  fn fetch_prompts_list(&mut self) -> Result<Vec<&MCPPromptDefinition>, NahError>;
+  fn fetch_prompts_list(&mut self) -> Result<Vec<&MCPPromptDefinition>, NahError> {
+    let id: String = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::prompts_list(&id);
+    let response = self.send_and_wait_for_response(request)?;
+
+    let result = match response.result {
+      None => {
+        return Err(match response.error {
+          None => NahError::mcp_server_communication_error(self.get_server_name()),
+          Some(err) => NahError::mcp_server_error(
+            self.get_server_name(),
+            &serde_json::to_string_pretty(&err).unwrap(),
+          ),
+        });
+      }
+      Some(res) => {
+        let prompts = match res
+          .as_object()
+          .and_then(|v| v.get("prompts"))
+          .and_then(|v| v.as_array())
+        {
+          None => {
+            return Err(NahError::mcp_server_invalid_response(
+              self.get_server_name(),
+            ));
+          }
+          Some(t) => t,
+        };
+
+        let mut prompt_map = HashMap::new();
+        prompts.iter().for_each(|item| {
+          let _ = serde_json::from_value::<MCPPromptDefinition>(item.clone()).is_ok_and(|v| {
+            prompt_map.insert(v.name.clone(), v);
+            true
+          });
+        });
+        self._set_prompt_map(prompt_map);
+
+        self._get_prompt_map().values().collect()
+      }
+    };
+    Ok(result)
+  }
 
   /**
    * Get the definition of a given prompt name. It may try to read the prompt from cached results.
    */
-  fn get_prompt_definition(&mut self, prompt_name: &str) -> Result<&MCPPromptDefinition, NahError>;
-
+  fn get_prompt_definition(&mut self, prompt_name: &str) -> Result<&MCPPromptDefinition, NahError> {
+    if self._get_prompt_map().contains_key(prompt_name) {
+      Ok(self._get_prompt_map().get(prompt_name).unwrap())
+    } else {
+      // re-fetch tool list
+      self.fetch_prompts_list()?;
+      match self._get_prompt_map().get(prompt_name) {
+        Some(p) => Ok(p),
+        None => Err(NahError::invalid_value(&format!(
+          "Invalid prompt name: {}",
+          prompt_name
+        ))),
+      }
+    }
+  }
   /**
    * Get the prompt content through a given prompt name and arguments.
    */
@@ -206,7 +310,20 @@ pub trait MCPServer {
     &mut self,
     prompt_name: &str,
     args: &HashMap<String, String>,
-  ) -> Result<MCPPromptResult, NahError>;
+  ) -> Result<MCPPromptResult, NahError> {
+    let id: String = uuid::Uuid::new_v4().to_string();
+    let request = MCPRequest::get_prompt(
+      &id,
+      prompt_name,
+      args.into_iter().map(|(k, v)| (k.as_str(), v.as_str())),
+    );
+    let response = self.send_and_wait_for_response(request)?;
+
+    match response.result {
+      Some(r) => Ok(serde_json::from_value::<MCPPromptResult>(r).unwrap()),
+      None => Err(self.parse_response_error(&response)),
+    }
+  }
 
   fn parse_response_error(&self, response: &MCPResponse) -> NahError {
     match &response.error {
@@ -216,6 +333,11 @@ pub trait MCPServer {
       None => NahError::mcp_server_error(self.get_server_name(), "unknown error"),
     }
   }
+
+  /**
+   * Set timeout for waiting for a response.
+   */
+  fn set_timeout(&mut self, timeout_ms: u64);
 }
 
 pub(in crate::mcp) fn parse_tools_list_from_response(

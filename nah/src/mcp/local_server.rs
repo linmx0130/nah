@@ -82,113 +82,8 @@ impl MCPServer for MCPLocalServerProcess {
     self.process.kill()
   }
 
-  fn get_resources_definition(&mut self, uri: &str) -> Result<&MCPResourceDefinition, NahError> {
-    if self.resource_cache.contains_key(uri) {
-      Ok(self.resource_cache.get(uri).unwrap())
-    } else {
-      self.fetch_resources_list()?;
-      match self.resource_cache.get(uri) {
-        Some(p) => Ok(p),
-        None => Err(NahError::invalid_value(&format!(
-          "Invalid resource uri: {}",
-          uri
-        ))),
-      }
-    }
-  }
-
-  fn read_resources(&mut self, uri: &str) -> Result<Vec<MCPResourceContent>, NahError> {
-    let id = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::resources_read(&id, uri);
-    let response = self.send_and_wait_for_response(request)?;
-    let contents = match response
-      .result
-      .as_ref()
-      .and_then(|result| result.as_object())
-      .and_then(|result_obj| result_obj.get("contents"))
-      .and_then(|contents| contents.as_array())
-    {
-      Some(r) => r,
-      None => return Err(self.parse_response_error(&response)),
-    };
-
-    Ok(
-      contents
-        .iter()
-        .map(|v| serde_json::from_value::<MCPResourceContent>(v.clone()))
-        .filter_map(|v| match v {
-          Ok(r) => {
-            if r.text.is_none() && r.blob.is_none() {
-              None
-            } else {
-              Some(r)
-            }
-          }
-          Err(_) => None,
-        })
-        .collect(),
-    )
-  }
-
   fn set_timeout(&mut self, timeout_ms: u64) {
     self.timeout_ms = timeout_ms;
-  }
-
-  fn fetch_prompts_list(&mut self) -> Result<Vec<&MCPPromptDefinition>, NahError> {
-    let id: String = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::prompts_list(&id);
-    let response = self.send_and_wait_for_response(request)?;
-
-    let result = match response.result {
-      None => {
-        return Err(match response.error {
-          None => NahError::mcp_server_communication_error(&self.server_name),
-          Some(err) => NahError::mcp_server_error(
-            &self.server_name,
-            &serde_json::to_string_pretty(&err).unwrap(),
-          ),
-        });
-      }
-      Some(res) => {
-        let prompts = match res
-          .as_object()
-          .and_then(|v| v.get("prompts"))
-          .and_then(|v| v.as_array())
-        {
-          None => {
-            return Err(NahError::mcp_server_invalid_response(&self.server_name));
-          }
-          Some(t) => t,
-        };
-
-        self.prompt_cache.clear();
-        prompts.iter().for_each(|item| {
-          let _ = serde_json::from_value::<MCPPromptDefinition>(item.clone()).is_ok_and(|v| {
-            self.prompt_cache.insert(v.name.clone(), v);
-            true
-          });
-        });
-
-        self.prompt_cache.values().collect()
-      }
-    };
-    Ok(result)
-  }
-
-  fn get_prompt_definition(&mut self, prompt_name: &str) -> Result<&MCPPromptDefinition, NahError> {
-    if self.prompt_cache.contains_key(prompt_name) {
-      Ok(self.prompt_cache.get(prompt_name).unwrap())
-    } else {
-      // re-fetch tool list
-      self.fetch_prompts_list()?;
-      match self.prompt_cache.get(prompt_name) {
-        Some(p) => Ok(p),
-        None => Err(NahError::invalid_value(&format!(
-          "Invalid prompt name: {}",
-          prompt_name
-        ))),
-      }
-    }
   }
 
   fn get_prompt_content(
@@ -228,6 +123,14 @@ impl MCPServer for MCPLocalServerProcess {
 
   fn _set_resource_map(&mut self, data: HashMap<String, MCPResourceDefinition>) {
     self.resource_cache = data;
+  }
+
+  fn _get_prompt_map<'a>(&'a self) -> &'a HashMap<String, MCPPromptDefinition> {
+    &self.prompt_cache
+  }
+
+  fn _set_prompt_map(&mut self, data: HashMap<String, MCPPromptDefinition>) {
+    self.prompt_cache = data;
   }
 }
 

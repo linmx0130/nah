@@ -155,7 +155,7 @@ impl AppContext {
    * Process a command.
    */
   fn process_command(&mut self, command: &str) -> bool {
-    let command_parts: Vec<&str> = command.split_ascii_whitespace().collect();
+    let command_parts: Vec<&str> = split_command_into_parts(command);
     match command_parts.first() {
       None => {
         // Empty input, not to append history
@@ -180,7 +180,7 @@ impl AppContext {
           "set_timeout" => self.process_set_timeout(&command_parts),
           "chat" => self.process_chat(),
           _ => {
-            println!("Invalid command: {}", key);
+            println!("Invalid command: {}.", key);
           }
         };
         true
@@ -530,9 +530,9 @@ MCP server of `server_name` will be restarted. If no `server_name` is provided, 
       println!("Usage: get_prompt [Prompt name]");
       return;
     }
-    let prompt_name = command_parts[1];
+    let prompt_name = drop_quotes(command_parts[1]);
     self.process_with_current_server(|_, server_process| {
-      let prompt_def = server_process.get_prompt_definition(prompt_name);
+      let prompt_def = server_process.get_prompt_definition(&prompt_name);
       match prompt_def {
         Ok(def) => {
           match &def.arguments {
@@ -579,7 +579,7 @@ MCP server of `server_name` will be restarted. If no `server_name` is provided, 
                 let args_map = arguments.iter().map(|(k, v)| {
                   (k.to_owned(), v.as_str().unwrap_or("").to_owned())
                 }).collect();
-                let result = server_process.get_prompt_content(prompt_name, &args_map);
+                let result = server_process.get_prompt_content(&prompt_name, &args_map);
                 match result {
                   Err(e) => {
                     println!("Received error: {}", e);
@@ -704,4 +704,96 @@ fn load_json_arguments(filename: &str) -> Result<Value, NahError> {
     }
     Ok(args) => Ok(args),
   }
+}
+
+fn split_command_into_parts(command: &str) -> Vec<&str> {
+  let mut ret = Vec::new();
+  let mut command_chars = command.chars();
+  let mut last_pos = 0usize;
+  let mut current_pos = 0usize;
+  let mut in_string = false;
+  let mut in_escape = false;
+  let mut in_chunk = false;
+  while current_pos < command.len() {
+    let current_char = command_chars.next();
+    current_pos += 1;
+    match current_char {
+      None => {
+        break;
+      }
+      Some(c) => {
+        if in_string {
+          // if in string, continue to move forward until hit a non-escaping quote
+          if c == '"' && !in_escape {
+            in_string = false;
+            in_chunk = false;
+            ret.push(&command[last_pos..current_pos]);
+            last_pos = current_pos
+          } else if c == '\\' {
+            in_escape = true;
+          } else {
+            in_escape = false;
+          }
+        } else {
+          if in_chunk {
+            if c.is_ascii_whitespace() {
+              in_chunk = false;
+              ret.push(&command[last_pos..current_pos - 1]);
+              last_pos = current_pos;
+            }
+          } else {
+            if c.is_ascii_whitespace() {
+              last_pos = current_pos;
+            } else if c == '"' {
+              in_string = true;
+              in_chunk = true;
+              last_pos = current_pos - 1;
+            } else {
+              in_chunk = true;
+              last_pos = current_pos - 1;
+            }
+          }
+        }
+      }
+    }
+  }
+  if in_chunk {
+    ret.push(&command[last_pos..current_pos]);
+  }
+  return ret;
+}
+
+fn drop_quotes(raw_content: &str) -> String {
+  if !raw_content.starts_with("\"") {
+    return raw_content.to_string();
+  }
+  let mut ret = String::new();
+  let mut chars = raw_content.chars();
+  chars.next();
+  let mut in_escape = false;
+  let mut c = chars.next();
+  while c.is_some() {
+    match c {
+      Some('\\') => {
+        in_escape = true;
+      }
+      Some('"') => {
+        if in_escape {
+          ret.push('"');
+          in_escape = false;
+        } else {
+          break;
+        }
+      }
+      Some(v) => {
+        ret.push(v);
+        in_escape = false;
+      }
+      None => {
+        break;
+      }
+    }
+    c = chars.next();
+  }
+  return ret;
 }
