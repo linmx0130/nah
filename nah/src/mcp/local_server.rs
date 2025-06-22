@@ -11,7 +11,7 @@ use std::{
   process::{Child, ChildStdin, ChildStdout, Command, Stdio},
 };
 
-use crate::mcp::{parse_tools_list_from_response, MCPServer};
+use crate::mcp::MCPServer;
 use crate::types::NahError;
 use nah_mcp_types::notification;
 use nah_mcp_types::request::MCPRequest;
