@@ -245,7 +245,10 @@ impl ChatContext {
           Some(ChatResponseChunk::Delta(d)) => {
             self.apply_model_response_chunk(&mut message, d);
             chunk_received += 1;
-            print!("\rModel is responding ... {} chunks received.", chunk_received);
+            print!(
+              "\rModel is responding ... {} chunks received.",
+              chunk_received
+            );
             let _ = std::io::stdout().flush();
           }
           Some(ChatResponseChunk::Done) => {
