@@ -12,3 +12,4 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1.16.0", features = ["v4"] }
 nah_mcp_types = { path="../nah_mcp_types" }
+bytes = { version = "1.10" }

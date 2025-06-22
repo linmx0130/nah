@@ -9,11 +9,16 @@ use crate::editor::launch_editor;
 use crate::types::NahError;
 use crate::AppContext;
 use crate::ModelConfig;
+use bytes::Bytes;
+use reqwest::RequestBuilder;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs::{File, OpenOptions};
 use tokio::runtime::{Builder, Runtime};
 
+/**
+ * Data structure of a chat message, could be from the user, the assistant or the tool.
+ */
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct ChatMessage {
   pub role: String,
@@ -22,6 +27,28 @@ struct ChatMessage {
   pub tool_calls: Option<Vec<ToolCallRequest>>,
 }
 
+/**
+ * A chunk of chat message response from the assistant.
+ */
+#[derive(Debug, Clone)]
+enum ChatResponseChunk {
+  Delta(ChatResponseChunkDelta),
+  Done,
+}
+
+/**
+ * Chunk delta of chat message from the assistant.
+ */
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct ChatResponseChunkDelta {
+  pub role: Option<String>,
+  pub content: Option<String>,
+  pub tool_calls: Option<Vec<ToolCallRequestChunkDelta>>,
+}
+
+/**
+ * A tool call request. Only function call is supported now.
+ */
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct ToolCallRequest {
   pub id: String,
@@ -30,10 +57,34 @@ struct ToolCallRequest {
   pub function: FunctionCallRequest,
 }
 
+/**
+ * A tool call request chunk received from stream api.
+ */
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct ToolCallRequestChunkDelta {
+  pub index: usize,
+  pub id: Option<String>,
+  #[serde(rename = "type")]
+  pub _type: Option<String>,
+  pub function: Option<FunctionCallRequestChunkDelta>,
+}
+
+/**
+ * A function call request.
+ */
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct FunctionCallRequest {
   pub name: String,
   pub arguments: String,
+}
+
+/**
+ * A function call request chunk received from stream api.
+ */
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct FunctionCallRequestChunkDelta {
+  pub name: Option<String>,
+  pub arguments: Option<String>,
 }
 
 #[derive(Debug)]
@@ -171,11 +222,60 @@ impl ChatContext {
    * Generate assistant message.
    */
   pub fn generate(&mut self) -> Result<&ChatMessage, NahError> {
+    let req_stream = self.get_generate_request(true);
+    let message: Result<ChatMessage, reqwest::Error> = self.tokio_runtime.block_on(async {
+      let mut res = req_stream.send().await?;
+      let mut message = ChatMessage {
+        role: "".to_owned(),
+        content: "".to_owned(),
+        tool_call_id: None,
+        tool_calls: None,
+      };
+      let mut reach_done = false;
+      let mut chunk_received = 0usize;
+      print!("Model is responding ...");
+      let _ = std::io::stdout().flush();
+      while !reach_done {
+        let chunk = match res.chunk().await? {
+          Some(chunk) => chunk,
+          None => continue,
+        };
+        let delta = self.get_model_response_chunk(chunk);
+        match delta {
+          Some(ChatResponseChunk::Delta(d)) => {
+            self.apply_model_response_chunk(&mut message, d);
+            chunk_received += 1;
+            print!(
+              "\rModel is responding ... {} chunks received.",
+              chunk_received
+            );
+            let _ = std::io::stdout().flush();
+          }
+          Some(ChatResponseChunk::Done) => {
+            reach_done = true;
+            println!("\nModel finished generation!");
+          }
+          None => {}
+        }
+      }
+      Ok(message)
+    });
+
+    match message {
+      Ok(msg) => {
+        self.messages.push(msg);
+        Ok(&self.messages[self.messages.len() - 1])
+      }
+      Err(_e) => Err(NahError::model_invalid_response(&self.model_config.model)),
+    }
+  }
+
+  fn get_generate_request(&self, is_stream: bool) -> RequestBuilder {
     let mut data = json!({
         "model": self.model_config.model,
         "messages": self.messages.clone(),
-        "stream": false,
-        "max_token": 4096,
+        "stream": is_stream,
+        "max_tokens": 4096,
         "tools": self.tools.clone(),
         "n": 1,
         "temperature": 0.7,
@@ -204,49 +304,96 @@ impl ChatContext {
       .bearer_auth(self.model_config.auth_token.clone())
       .header("Content-Type", "application/json")
       .body(serde_json::to_string(&data).unwrap());
-    let res = self
-      .tokio_runtime
-      .block_on(async { req.send().await?.text().await });
-    match res {
-      Ok(resp) => self.process_model_response(&resp),
-      Err(_e) => Err(NahError::model_invalid_response(&self.model_config.model)),
-    }
+    req
   }
 
-  fn process_model_response(&mut self, resp_text: &str) -> Result<&ChatMessage, NahError> {
-    let resp = serde_json::from_str::<Value>(&resp_text);
-    let resp_obj = match resp {
-      Ok(o) => o,
-      Err(_e) => {
-        return Err(NahError::model_invalid_response(&self.model_config.model));
+  /**
+   * Parse the stream data from the stream chat completion API to obtain a chunk delta.
+   */
+  fn get_model_response_chunk(&self, chunk: Bytes) -> Option<ChatResponseChunk> {
+    let data_str = match String::from_utf8(chunk.to_vec()) {
+      Ok(v) => v,
+      Err(_) => {
+        return None;
       }
     };
-    let choices = match resp_obj
-      .as_object()
-      .and_then(|o| o.get("choices"))
-      .and_then(|c| c.as_array())
-    {
-      Some(c) => c,
-      None => {
-        return Err(NahError::model_invalid_response(&self.model_config.model));
-      }
-    };
-    if choices.len() < 1 {
-      return Err(NahError::model_invalid_response(&self.model_config.model));
+    if !data_str.starts_with("data: ") {
+      return None;
     }
-    let choice = &choices[0];
-    self.push_message(match choice.as_object().and_then(|c| c.get("message")) {
-      Some(p) => match serde_json::from_value::<ChatMessage>(p.clone()) {
-        Ok(v) => v,
-        Err(_) => {
-          return Err(NahError::model_invalid_response(&self.model_config.model));
-        }
-      },
-      None => {
-        return Err(NahError::model_invalid_response(&self.model_config.model));
-      }
+    if data_str.starts_with("data: [DONE]") {
+      return Some(ChatResponseChunk::Done);
+    }
+    let trim_data = data_str.strip_prefix("data: ").unwrap().trim();
+    let chunk_value: Value = match serde_json::from_str(trim_data) {
+      Ok(v) => v,
+      Err(_) => return None,
+    };
+    let delta_value = chunk_value
+      .as_object()
+      .and_then(|chunk| chunk.get("choices"))
+      .and_then(|choices_value| choices_value.as_array())
+      .and_then(|choices_arr| choices_arr.get(0))
+      .and_then(|choice_value| choice_value.as_object())
+      .and_then(|choice_obj| choice_obj.get("delta"));
+
+    delta_value.and_then(|v| match serde_json::from_value(v.to_owned()) {
+      Ok(v) => Some(ChatResponseChunk::Delta(v)),
+      Err(_) => None,
+    })
+  }
+
+  /**
+   * Consume the chunk delta return from the chat completion stream API and apply it on to the message.
+   */
+  fn apply_model_response_chunk(&self, message: &mut ChatMessage, chunk: ChatResponseChunkDelta) {
+    chunk.role.and_then(|role| {
+      message.role = role;
+      Some(())
     });
-    Ok(&self.messages[self.messages.len() - 1])
+    chunk.content.and_then(|content| {
+      message.content.push_str(&content);
+      Some(())
+    });
+    chunk.tool_calls.and_then(|tool_calls| {
+      if message.tool_calls.is_none() {
+        message.tool_calls = Some(Vec::new());
+      }
+      let message_tool_calls = message.tool_calls.as_mut().unwrap();
+      for tool_call in tool_calls {
+        let idx = tool_call.index;
+        while idx >= message_tool_calls.len() {
+          message_tool_calls.push(ToolCallRequest {
+            id: "".to_owned(),
+            _type: "".to_owned(),
+            function: FunctionCallRequest {
+              name: "".to_owned(),
+              arguments: "".to_owned(),
+            },
+          });
+        }
+        let object_to_apply = message_tool_calls.get_mut(idx).unwrap();
+        tool_call.id.and_then(|id| {
+          object_to_apply.id.push_str(&id);
+          Some(())
+        });
+        tool_call._type.and_then(|t| {
+          object_to_apply._type.push_str(&t);
+          Some(())
+        });
+        tool_call.function.and_then(|fcall| {
+          fcall.name.and_then(|name| {
+            object_to_apply.function.name.push_str(&name);
+            Some(())
+          });
+          fcall.arguments.and_then(|arg| {
+            object_to_apply.function.arguments.push_str(&arg);
+            Some(())
+          });
+          Some(())
+        });
+      }
+      Some(())
+    });
   }
 
   fn process_tool_calls(&mut self, app: &mut AppContext) -> Result<(), NahError> {
