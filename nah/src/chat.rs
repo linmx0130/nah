@@ -245,7 +245,7 @@ impl ChatContext {
           Some(ChatResponseChunk::Delta(d)) => {
             self.apply_model_response_chunk(&mut message, d);
             chunk_received += 1;
-            print!("\rModel is responding ... {} / ??", chunk_received);
+            print!("\rModel is responding ... {} chunks received.", chunk_received);
             let _ = std::io::stdout().flush();
           }
           Some(ChatResponseChunk::Done) => {
@@ -267,12 +267,12 @@ impl ChatContext {
     }
   }
 
-  fn get_generate_request(&mut self, is_stream: bool) -> RequestBuilder {
+  fn get_generate_request(&self, is_stream: bool) -> RequestBuilder {
     let mut data = json!({
         "model": self.model_config.model,
         "messages": self.messages.clone(),
         "stream": is_stream,
-        "max_token": 4096,
+        "max_tokens": 4096,
         "tools": self.tools.clone(),
         "n": 1,
         "temperature": 0.7,
