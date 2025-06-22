@@ -232,6 +232,9 @@ impl ChatContext {
         tool_calls: None,
       };
       let mut reach_done = false;
+      let mut chunk_received = 0usize;
+      print!("Model is responding ...");
+      let _ = std::io::stdout().flush();
       while !reach_done {
         let chunk = match res.chunk().await? {
           Some(chunk) => chunk,
@@ -241,9 +244,13 @@ impl ChatContext {
         match delta {
           Some(ChatResponseChunk::Delta(d)) => {
             self.apply_model_response_chunk(&mut message, d);
+            chunk_received += 1;
+            print!("\rModel is responding ... {} / ??", chunk_received);
+            let _ = std::io::stdout().flush();
           }
           Some(ChatResponseChunk::Done) => {
             reach_done = true;
+            println!("\nModel finished generation!");
           }
           None => {}
         }
