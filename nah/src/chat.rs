@@ -9,6 +9,8 @@ use crate::editor::launch_editor;
 use crate::types::NahError;
 use crate::AppContext;
 use crate::ModelConfig;
+use bytes::Bytes;
+use reqwest::RequestBuilder;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs::{File, OpenOptions};
@@ -23,6 +25,13 @@ struct ChatMessage {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+struct ChatResponseChunkDelta {
+  pub role: Option<String>,
+  pub content: Option<String>,
+  pub tool_calls: Option<Vec<ToolCallRequestChunkDelta>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct ToolCallRequest {
   pub id: String,
   #[serde(rename = "type")]
@@ -31,9 +40,24 @@ struct ToolCallRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+struct ToolCallRequestChunkDelta {
+  pub index: Option<usize>,
+  pub id: Option<String>,
+  #[serde(rename = "type")]
+  pub _type: Option<String>,
+  pub function: Option<FunctionCallRequestChunkDelta>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct FunctionCallRequest {
   pub name: String,
   pub arguments: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct FunctionCallRequestChunkDelta {
+  pub name: Option<String>,
+  pub arguments: Option<String>,
 }
 
 #[derive(Debug)]
@@ -171,10 +195,32 @@ impl ChatContext {
    * Generate assistant message.
    */
   pub fn generate(&mut self) -> Result<&ChatMessage, NahError> {
+    let req_stream = self.get_generate_request(true);
+    let x: Result<(), reqwest::Error> = self.tokio_runtime.block_on(async {
+      let mut res = req_stream.send().await?;
+      while let Some(chunk) = res.chunk().await? {
+        let delta = self.get_model_response_chunk(chunk);
+        println!("{:?}", delta);
+      }
+      Ok(())
+    });
+
+    let req = self.get_generate_request(false);
+    let res = self.tokio_runtime.block_on(async {
+      let resp = req.send().await?;
+      resp.text().await
+    });
+    match res {
+      Ok(resp) => self.process_model_response(&resp),
+      Err(_e) => Err(NahError::model_invalid_response(&self.model_config.model)),
+    }
+  }
+
+  fn get_generate_request(&mut self, is_stream: bool) -> RequestBuilder {
     let mut data = json!({
         "model": self.model_config.model,
         "messages": self.messages.clone(),
-        "stream": false,
+        "stream": is_stream,
         "max_token": 4096,
         "tools": self.tools.clone(),
         "n": 1,
@@ -204,13 +250,39 @@ impl ChatContext {
       .bearer_auth(self.model_config.auth_token.clone())
       .header("Content-Type", "application/json")
       .body(serde_json::to_string(&data).unwrap());
-    let res = self
-      .tokio_runtime
-      .block_on(async { req.send().await?.text().await });
-    match res {
-      Ok(resp) => self.process_model_response(&resp),
-      Err(_e) => Err(NahError::model_invalid_response(&self.model_config.model)),
+    req
+  }
+
+  fn get_model_response_chunk(&self, chunk: Bytes) -> Option<ChatResponseChunkDelta> {
+    let data_str = match String::from_utf8(chunk.to_vec()) {
+      Ok(v) => v,
+      Err(_) => {
+        return None;
+      }
+    };
+    if !data_str.starts_with("data: ") {
+      return None;
     }
+    if data_str.starts_with("data: [DONE]") {
+      return None;
+    }
+    let trim_data = data_str.strip_prefix("data: ").unwrap().trim();
+    let chunk_value: Value = match serde_json::from_str(trim_data) {
+      Ok(v) => v,
+      Err(_) => return None,
+    };
+    let delta_value = chunk_value
+      .as_object()
+      .and_then(|chunk| chunk.get("choices"))
+      .and_then(|choices_value| choices_value.as_array())
+      .and_then(|choices_arr| choices_arr.get(0))
+      .and_then(|choice_value| choice_value.as_object())
+      .and_then(|choice_obj| choice_obj.get("delta"));
+
+    delta_value.and_then(|v| match serde_json::from_value(v.to_owned()) {
+      Ok(v) => Some(v),
+      Err(_) => None,
+    })
   }
 
   fn process_model_response(&mut self, resp_text: &str) -> Result<&ChatMessage, NahError> {
