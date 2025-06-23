@@ -2,6 +2,7 @@
 name = "nah"
 version = "0.1.0"
 edition = "2021"
+license = "MPL-2.0"
 
 [dependencies]
 tokio = { version = "1.45.0", features = ["rt", "net"] }

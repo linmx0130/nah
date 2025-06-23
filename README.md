@@ -33,4 +33,4 @@ $ EDITOR=nano nah ~/mcp/config.json
 ```
 
 ## Copyright
-Copyright (c) 2025 Mengxiao Lin. Released under MIT License. Check [LICENSE](./LICENSE) file for more details.
+Copyright (c) 2025 Mengxiao Lin. Released under Mozilla Public License 2.0. Check [LICENSE](./LICENSE) file for more details.
