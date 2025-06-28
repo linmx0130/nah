@@ -1,6 +1,6 @@
 nah: **N**ot **A** **H**uman
 ===
-A user agent for exploring [Model Context Protocol](https://modelcontextprotocol.io).
+A user agent for exploring [Model Context Protocol](https://modelcontextprotocol.io) and chatting with language models.
 
 **WARNING**: Still in active development, use at your own risk!
 
@@ -10,7 +10,25 @@ A user agent for exploring [Model Context Protocol](https://modelcontextprotocol
 $ nah ~/mcp/config.json
 ```
 
+`nah` also supports to chat with a LLM with all tools from the MCP servers. See [example config](nah/examples/weather/config.json) for more details. 
+
+For Qwen3 models where you have controls on whether to enable thinkings, using following config to enable/disable thinking mode:
+```json
+{
+    "model": {
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "model": "qwen/qwen3-30b-a3b:free",
+        "authToken": "<AUTH_TOKEN_HERE>",
+        "extraParams": {
+            "enable_thinking": true
+        }
+    },
+    "mcpServers": {...}
+}
+```
+
 After launching `nah`, it will active all MCP servers declared in the config file and provide a shell-like user interface. Here are some useful commands supported by `nah`.
+* `chat`:             Chat with a LLM with all tools installed.
 * `use`:              Select a MCP server to interactive with.
 * `list_tools`:       List all tools on the current server.
 * `call_tool`:        Call a tool on the current server.
