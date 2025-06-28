@@ -228,49 +228,58 @@ impl ChatContext {
    */
   pub fn generate(&mut self) -> Result<&ChatMessage, NahError> {
     let req_stream = self.get_generate_request(true);
-    let message: Result<ChatMessage, reqwest::Error> = self.tokio_runtime.block_on(async {
-      let mut res = req_stream.send().await?;
-      let mut message = ChatMessage {
-        role: "".to_owned(),
-        content: "".to_owned(),
-        tool_call_id: None,
-        tool_calls: None,
-      };
-      let mut reach_done = false;
-      let mut chunk_received = 0usize;
-      print!("Model is responding ...");
-      let _ = std::io::stdout().flush();
-      while !reach_done {
-        let chunk = match res.chunk().await? {
-          Some(chunk) => chunk,
-          None => continue,
-        };
-        let delta = self.get_model_response_chunk(chunk);
-        match delta {
-          Some(ChatResponseChunk::Delta(d)) => {
-            self.apply_model_response_chunk(&mut message, d);
-            chunk_received += 1;
-            print!(
-              "\rModel is responding ... {} chunks received.",
-              chunk_received
-            );
-            let _ = std::io::stdout().flush();
-          }
-          Some(ChatResponseChunk::Done) => {
-            reach_done = true;
-            println!("\nModel finished generation!");
-          }
-          None => {}
+    let message: Result<Result<ChatMessage, NahError>, reqwest::Error> =
+      self.tokio_runtime.block_on(async {
+        let mut res = req_stream.send().await?;
+        if !res.status().is_success() {
+          let code = res.status().as_u16();
+          return Ok(Err(NahError::model_error(
+            &self.model_config.model,
+            &format!("Model server responds an error, HTTP Status = {}", code),
+          )));
         }
-      }
-      Ok(message)
-    });
+        let mut message = ChatMessage {
+          role: "".to_owned(),
+          content: "".to_owned(),
+          tool_call_id: None,
+          tool_calls: None,
+        };
+        let mut reach_done = false;
+        let mut chunk_received = 0usize;
+        print!("Model is responding ...");
+        let _ = std::io::stdout().flush();
+        while !reach_done {
+          let chunk = match res.chunk().await? {
+            Some(chunk) => chunk,
+            None => continue,
+          };
+          let delta = self.get_model_response_chunk(chunk);
+          match delta {
+            Some(ChatResponseChunk::Delta(d)) => {
+              self.apply_model_response_chunk(&mut message, d);
+              chunk_received += 1;
+              print!(
+                "\rModel is responding ... {} chunks received.",
+                chunk_received
+              );
+              let _ = std::io::stdout().flush();
+            }
+            Some(ChatResponseChunk::Done) => {
+              reach_done = true;
+              println!("\nModel finished generation!");
+            }
+            None => {}
+          }
+        }
+        Ok(Ok(message))
+      });
 
     match message {
-      Ok(msg) => {
+      Ok(Ok(msg)) => {
         self.messages.push(msg);
         Ok(&self.messages[self.messages.len() - 1])
       }
+      Ok(Err(e)) => Err(e),
       Err(_e) => Err(NahError::model_invalid_response(&self.model_config.model)),
     }
   }
