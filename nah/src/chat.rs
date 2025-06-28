@@ -228,8 +228,18 @@ impl ChatContext {
    */
   pub fn generate(&mut self) -> Result<&ChatMessage, NahError> {
     let req_stream = self.get_generate_request(true);
-    let message: Result<ChatMessage, reqwest::Error> = self.tokio_runtime.block_on(async {
-      let mut res = req_stream.send().await?;
+    let message: Result<ChatMessage, NahError> = self.tokio_runtime.block_on(async {
+      let mut res = match req_stream.send().await {
+        Ok(r) => r,
+        Err(_e) => return Err(NahError::model_invalid_response(&self.model_config.model)),
+      };
+      if !res.status().is_success() {
+        let code = res.status().as_u16();
+        return Err(NahError::model_error(
+          &self.model_config.model,
+          &format!("Model server responded with error: HTTP status {}", code),
+        ));
+      }
       let mut message = ChatMessage {
         role: "".to_owned(),
         content: "".to_owned(),
@@ -241,9 +251,10 @@ impl ChatContext {
       print!("Model is responding ...");
       let _ = std::io::stdout().flush();
       while !reach_done {
-        let chunk = match res.chunk().await? {
-          Some(chunk) => chunk,
-          None => continue,
+        let chunk = match res.chunk().await {
+          Ok(Some(chunk)) => chunk,
+          Ok(None) => continue,
+          Err(_e) => return Err(NahError::model_invalid_response(&self.model_config.model)),
         };
         let delta = self.get_model_response_chunk(chunk);
         match delta {
