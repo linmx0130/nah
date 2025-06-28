@@ -28,6 +28,8 @@ use tokio::runtime::{Builder, Runtime};
 struct ChatMessage {
   pub role: String,
   pub content: String,
+  #[serde(rename = "reasoningContent")]
+  pub reasoning_content: Option<String>,
   pub tool_call_id: Option<String>,
   pub tool_calls: Option<Vec<ToolCallRequest>>,
 }
@@ -48,6 +50,8 @@ enum ChatResponseChunk {
 struct ChatResponseChunkDelta {
   pub role: Option<String>,
   pub content: Option<String>,
+  #[serde(rename = "reasoning_content")]
+  pub reasoning_content: Option<String>,
   pub tool_calls: Option<Vec<ToolCallRequestChunkDelta>>,
 }
 
@@ -162,6 +166,12 @@ pub fn process_chat(context: &mut AppContext) {
                   }
                   loop_end = false;
                 } else {
+                  if msg.reasoning_content.is_some() {
+                    println!(
+                      "[Assistant Reasoning]: {}",
+                      msg.reasoning_content.as_ref().unwrap()
+                    );
+                  }
                   println!("[Assistant]: {}", msg.content);
                   loop_end = true;
                 }
@@ -218,6 +228,7 @@ impl ChatContext {
     self.push_message(ChatMessage {
       role: "user".to_string(),
       content: message,
+      reasoning_content: None,
       tool_call_id: None,
       tool_calls: None,
     });
@@ -243,6 +254,7 @@ impl ChatContext {
       let mut message = ChatMessage {
         role: "".to_owned(),
         content: "".to_owned(),
+        reasoning_content: None,
         tool_call_id: None,
         tool_calls: None,
       };
@@ -279,7 +291,7 @@ impl ChatContext {
 
     match message {
       Ok(msg) => {
-        self.messages.push(msg);
+        self.push_message(msg);
         Ok(&self.messages[self.messages.len() - 1])
       }
       Err(_e) => Err(NahError::model_invalid_response(&self.model_config.model)),
@@ -370,6 +382,17 @@ impl ChatContext {
       message.content.push_str(&content);
       Some(())
     });
+    chunk
+      .reasoning_content
+      .and_then(|reasoning_content: String| {
+        match &mut message.reasoning_content {
+          Some(r) => {
+            r.push_str(&reasoning_content);
+          }
+          None => message.reasoning_content = Some(reasoning_content),
+        }
+        Some(())
+      });
     chunk.tool_calls.and_then(|tool_calls| {
       if message.tool_calls.is_none() {
         message.tool_calls = Some(Vec::new());
@@ -434,6 +457,7 @@ impl ChatContext {
         tool_call_responses.push(ChatMessage {
           role: "tool".to_owned(),
           content: text_content,
+          reasoning_content: None,
           tool_call_id: Some(item.id.to_owned()),
           tool_calls: None,
         });
