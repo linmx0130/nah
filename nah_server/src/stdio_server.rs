@@ -37,7 +37,7 @@ where
                         }
                     }
                 } else {
-                    // TOOD: notification process
+                    // TODO: notification process
                     continue;
                 }
             }
