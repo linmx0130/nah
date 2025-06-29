@@ -7,6 +7,7 @@ use nah_mcp_types::MCPToolDefinition;
 use serde::Serialize;
 use serde_json::Value;
 
+pub(crate) mod process_routine;
 mod stdio_server;
 pub use crate::stdio_server::run_mcp_server_with_stdio;
 

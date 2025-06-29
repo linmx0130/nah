@@ -4,10 +4,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
+use crate::process_routine::process_initialize;
 use crate::AbstractMCPServer;
 use nah_mcp_types::request::MCPRequest;
 use nah_mcp_types::MCPResponse;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::error::Error;
 use std::io::{stderr, stdin, stdout, Write};
 
@@ -46,7 +47,7 @@ where
 
         match request.method.as_str() {
             "initialize" => {
-                process_initialize(server, request)?;
+                send_response(process_initialize(server, request))?;
             }
             _ => {
                 println!("request: {}", request.method);
@@ -78,27 +79,9 @@ where
 }
 
 /**
- * Process the initialize request
+ * Send a response to stdout.
  */
-fn process_initialize<T>(server: &mut T, request: MCPRequest) -> std::io::Result<()>
-where
-    T: AbstractMCPServer,
-{
-    let id = request.id.as_str();
-    let mut result = json!({
-        "protocolVersion": "2024-11-05",
-        "capabilities": {
-            "tools": {
-                "listChanged": false
-            }
-        }
-    });
-    result.as_object_mut().unwrap().insert(
-        "serverInfo".to_string(),
-        serde_json::to_value(server.get_server_info()).unwrap(),
-    );
-
-    let resp = MCPResponse::new(id.to_string(), Some(result), None);
+fn send_response(resp: MCPResponse) -> std::io::Result<()> {
     let resp_str = serde_json::to_string(&resp).unwrap();
     let mut stdout = stdout();
     stdout.write(resp_str.as_bytes())?;
