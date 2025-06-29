@@ -190,6 +190,7 @@ impl MCPLocalServerProcess {
     let mut server_process = match server_command.spawn() {
       Ok(p) => p,
       Err(_e) => {
+        println!("{:?}", _e);
         return Err(NahError::mcp_server_process_launch_error(name));
       }
     };

@@ -42,5 +42,6 @@ pub trait AbstractMCPServer {
      * * `name`: the name of the function to be caled.
      * * `args`: the arguments of the function call in JSON Value
      */
-    fn on_tool_call(&mut self, name: String, args: Value) -> String;
+    fn on_tool_call(&mut self, name: &str, args: Option<&serde_json::Map<String, Value>>)
+        -> String;
 }

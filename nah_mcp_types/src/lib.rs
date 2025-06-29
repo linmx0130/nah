@@ -42,7 +42,7 @@ pub struct MCPServerCommand {
 /**
  * Describe a MCP tool.
  */
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MCPToolDefinition {
   pub name: String,
   pub description: Option<String>,

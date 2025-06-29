@@ -4,7 +4,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-use crate::process_routine::process_initialize;
+use crate::process_routine::{process_initialize, process_tools_call, process_tools_list};
 use crate::AbstractMCPServer;
 use nah_mcp_types::request::MCPRequest;
 use nah_mcp_types::MCPResponse;
@@ -45,14 +45,16 @@ where
             }
         };
 
-        match request.method.as_str() {
-            "initialize" => {
-                send_response(process_initialize(server, request))?;
-            }
+        let response = match request.method.as_str() {
+            "initialize" => process_initialize(server, request),
+            "tools/list" => process_tools_list(server, request),
+            "tools/call" => process_tools_call(server, request),
             _ => {
                 println!("request: {}", request.method);
+                continue;
             }
-        }
+        };
+        send_response(response)?;
     }
 }
 
