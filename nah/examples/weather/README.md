@@ -70,3 +70,6 @@ Enjoy your trip! 🌆
 Press [ENTER] to draft user message, `exit` to end this chat.
 [chat]>> exit
 ```
+
+# License
+Files in this folder are released in the public domain.

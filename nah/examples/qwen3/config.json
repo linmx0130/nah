@@ -1,0 +1,11 @@
+{
+    "mcpServers": {},
+    "model": {
+        "baseUrl": "https://openrouter.ai/api/v1",
+    	"model": "qwen/qwen3-32b:free",
+	    "authToken": "<USE-YOUR-AUTH-TOKEN>",
+	    "extraParams": {
+	        "enable_thinking": true
+	    }
+    }
+}
