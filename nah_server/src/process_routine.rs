@@ -106,3 +106,14 @@ fn invalid_params_error_response(id: &str, message: String) -> MCPResponse {
         })),
     )
 }
+
+pub fn invalid_request(id: &str, message: String) -> MCPResponse {
+    MCPResponse::new(
+        id.to_string(),
+        None,
+        Some(json!({
+            "code":-32600,
+            "message": message
+        })),
+    )
+}

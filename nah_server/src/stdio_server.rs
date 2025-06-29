@@ -4,7 +4,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-use crate::process_routine::{process_initialize, process_tools_call, process_tools_list};
+use crate::process_routine::{
+    invalid_request, process_initialize, process_tools_call, process_tools_list,
+};
 use crate::AbstractMCPServer;
 use nah_mcp_types::request::MCPRequest;
 use nah_mcp_types::MCPResponse;
@@ -49,10 +51,7 @@ where
             "initialize" => process_initialize(server, request),
             "tools/list" => process_tools_list(server, request),
             "tools/call" => process_tools_call(server, request),
-            _ => {
-                println!("request: {}", request.method);
-                continue;
-            }
+            _ => invalid_request(&request.id, format!("Unknown method: {}", request.method)),
         };
         send_response(response)?;
     }
