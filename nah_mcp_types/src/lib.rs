@@ -19,6 +19,17 @@ pub struct MCPResponse {
   pub error: Option<Value>,
 }
 
+impl MCPResponse {
+  pub fn new(id: String, result: Option<Value>, error: Option<Value>) -> MCPResponse {
+    MCPResponse {
+      jsonrpc: "2.0".to_string(),
+      id,
+      result,
+      error,
+    }
+  }
+}
+
 /**
  * Describes how to launch a MCP server with a command.
  */
@@ -31,7 +42,7 @@ pub struct MCPServerCommand {
 /**
  * Describe a MCP tool.
  */
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MCPToolDefinition {
   pub name: String,
   pub description: Option<String>,
