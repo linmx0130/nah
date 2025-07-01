@@ -74,7 +74,7 @@ pub trait MCPServer {
    */
   fn fetch_tools(&mut self) -> Result<Vec<&MCPToolDefinition>, NahError> {
     let id: String = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::tools_list(&id);
+    let request = MCPRequest::tools_list(&Value::String(id));
     let response = self.send_and_wait_for_response(request)?;
 
     let tool_list = parse_tools_list_from_response(self.get_server_name(), response)?;
@@ -91,7 +91,7 @@ pub trait MCPServer {
    */
   fn call_tool(&mut self, tool_name: &str, args: &Value) -> Result<Value, NahError> {
     let id: String = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::tools_call(&id, tool_name, args);
+    let request = MCPRequest::tools_call(&Value::String(id), tool_name, args);
     let response = self.send_and_wait_for_response(request)?;
 
     match response.result {
@@ -124,7 +124,7 @@ pub trait MCPServer {
    */
   fn fetch_resources_list(&mut self) -> Result<Vec<&MCPResourceDefinition>, NahError> {
     let id: String = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::resources_list(&id);
+    let request = MCPRequest::resources_list(&Value::String(id));
     let response = self.send_and_wait_for_response(request)?;
     match response.result {
       Some(res) => {
@@ -161,7 +161,7 @@ pub trait MCPServer {
    */
   fn fetch_resource_templates_list(&mut self) -> Result<Vec<MCPResourceDefinition>, NahError> {
     let id: String = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::resource_templates_list(&id);
+    let request = MCPRequest::resource_templates_list(&Value::String(id));
     let response = self.send_and_wait_for_response(request)?;
     match response.result {
       Some(res) => {
@@ -212,7 +212,7 @@ pub trait MCPServer {
    */
   fn read_resources(&mut self, uri: &str) -> Result<Vec<MCPResourceContent>, NahError> {
     let id = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::resources_read(&id, uri);
+    let request = MCPRequest::resources_read(&Value::String(id), uri);
     let response = self.send_and_wait_for_response(request)?;
     let contents = match response
       .result
@@ -248,7 +248,7 @@ pub trait MCPServer {
    */
   fn fetch_prompts_list(&mut self) -> Result<Vec<&MCPPromptDefinition>, NahError> {
     let id: String = uuid::Uuid::new_v4().to_string();
-    let request = MCPRequest::prompts_list(&id);
+    let request = MCPRequest::prompts_list(&Value::String(id));
     let response = self.send_and_wait_for_response(request)?;
 
     let result = match response.result {
@@ -318,7 +318,7 @@ pub trait MCPServer {
   ) -> Result<MCPPromptResult, NahError> {
     let id: String = uuid::Uuid::new_v4().to_string();
     let request = MCPRequest::get_prompt(
-      &id,
+      &Value::String(id),
       prompt_name,
       args.into_iter().map(|(k, v)| (k.as_str(), v.as_str())),
     );

@@ -98,7 +98,7 @@ impl MCPServer for MCPLocalServerProcess {
   ) -> Result<MCPPromptResult, NahError> {
     let id: String = uuid::Uuid::new_v4().to_string();
     let request = MCPRequest::get_prompt(
-      &id,
+      &Value::String(id),
       prompt_name,
       args.into_iter().map(|(k, v)| (k.as_str(), v.as_str())),
     );
@@ -209,8 +209,11 @@ impl MCPLocalServerProcess {
       history_file,
     };
 
-    let initialize_request =
-      MCPRequest::initialize(&uuid::Uuid::new_v4().to_string(), "nah", "0.1");
+    let initialize_request = MCPRequest::initialize(
+      &Value::String(uuid::Uuid::new_v4().to_string()),
+      "nah",
+      "0.1",
+    );
     let response: MCPResponse = result.send_and_wait_for_response(initialize_request)?;
     let initialized_notification = MCPNotification::initialized();
     result.send_data(initialized_notification)?;
