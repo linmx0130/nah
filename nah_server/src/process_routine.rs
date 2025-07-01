@@ -14,7 +14,7 @@ pub fn process_initialize<T>(server: &mut T, request: MCPRequest) -> MCPResponse
 where
     T: AbstractMCPServer,
 {
-    let id = &request.id;
+    let id = request.id;
     let mut result = json!({
         "protocolVersion": "2024-11-05",
         "capabilities": {
