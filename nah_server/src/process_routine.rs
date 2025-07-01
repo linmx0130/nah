@@ -14,7 +14,7 @@ pub fn process_initialize<T>(server: &mut T, request: MCPRequest) -> MCPResponse
 where
     T: AbstractMCPServer,
 {
-    let id = request.id.as_str();
+    let id = &request.id;
     let mut result = json!({
         "protocolVersion": "2024-11-05",
         "capabilities": {
@@ -28,7 +28,7 @@ where
         serde_json::to_value(server.get_server_info()).unwrap(),
     );
 
-    MCPResponse::new(id.to_string(), Some(result), None)
+    MCPResponse::new(id.clone(), Some(result), None)
 }
 
 /**
@@ -38,7 +38,7 @@ pub fn process_tools_list<T>(server: &mut T, request: MCPRequest) -> MCPResponse
 where
     T: AbstractMCPServer,
 {
-    let id = request.id.as_str();
+    let id = &request.id;
     let tools_list: Vec<Value> = server
         .get_tools_list()
         .into_iter()
@@ -47,7 +47,7 @@ where
     let mut result_map = serde_json::Map::new();
     result_map.insert("tools".to_string(), Value::Array(tools_list));
     let result = Value::Object(result_map);
-    MCPResponse::new(id.to_string(), Some(result), None)
+    MCPResponse::new(id.clone(), Some(result), None)
 }
 
 /**
@@ -57,7 +57,7 @@ pub fn process_tools_call<T>(server: &mut T, mut request: MCPRequest) -> MCPResp
 where
     T: AbstractMCPServer,
 {
-    let id = request.id.as_str();
+    let id = &request.id;
     let params_value = request.params.take();
     let params = match params_value {
         Some(p) => match p.as_object() {
@@ -88,7 +88,7 @@ where
     let args = params.get("arguments").and_then(|v| v.as_object());
     let response_content = server.on_tool_call(name, args);
     MCPResponse::new(
-        id.to_string(),
+        id.clone(),
         Some(json!({
             "content": [{"type": "text", "text": response_content}]
         })),
@@ -96,9 +96,9 @@ where
     )
 }
 
-fn invalid_params_error_response(id: &str, message: String) -> MCPResponse {
+fn invalid_params_error_response(id: &Value, message: String) -> MCPResponse {
     MCPResponse::new(
-        id.to_string(),
+        id.clone(),
         None,
         Some(json!({
             "code": -32603,
@@ -107,9 +107,9 @@ fn invalid_params_error_response(id: &str, message: String) -> MCPResponse {
     )
 }
 
-pub fn invalid_request(id: &str, message: String) -> MCPResponse {
+pub fn invalid_request(id: &Value, message: String) -> MCPResponse {
     MCPResponse::new(
-        id.to_string(),
+        id.clone(),
         None,
         Some(json!({
             "code":-32600,

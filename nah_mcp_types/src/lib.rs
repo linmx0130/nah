@@ -14,13 +14,15 @@ use serde_json::Value;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MCPResponse {
   jsonrpc: String,
-  pub id: String,
+  pub id: Value,
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub result: Option<Value>,
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub error: Option<Value>,
 }
 
 impl MCPResponse {
-  pub fn new(id: String, result: Option<Value>, error: Option<Value>) -> MCPResponse {
+  pub fn new(id: Value, result: Option<Value>, error: Option<Value>) -> MCPResponse {
     MCPResponse {
       jsonrpc: "2.0".to_string(),
       id,

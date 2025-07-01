@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 pub struct MCPRequest {
   jsonrpc: String,
   pub method: String,
-  pub id: String,
+  pub id: Value,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub params: Option<Value>,
 }
@@ -21,7 +21,7 @@ impl MCPRequest {
   /**
    * Request to initialize the server.
    */
-  pub fn initialize(id: &str, client_name: &str, client_version: &str) -> Self {
+  pub fn initialize(id: &Value, client_name: &str, client_version: &str) -> Self {
     let params = Some(json!({
         "protocolVersion": "2024-11-05",
         "capabilities": json!({}),
@@ -33,7 +33,7 @@ impl MCPRequest {
     MCPRequest {
       jsonrpc: "2.0".to_string(),
       method: "initialize".to_string(),
-      id: id.to_string(),
+      id: id.clone(),
       params,
     }
   }
@@ -41,11 +41,11 @@ impl MCPRequest {
   /**
    * Request to fetch the list of available tools from `tools/list`.
    */
-  pub fn tools_list(id: &str) -> Self {
+  pub fn tools_list(id: &Value) -> Self {
     MCPRequest {
       jsonrpc: "2.0".to_string(),
       method: "tools/list".to_string(),
-      id: id.to_string(),
+      id: id.clone(),
       params: None,
     }
   }
@@ -53,11 +53,11 @@ impl MCPRequest {
   /**
    * Request to call a tool.
    */
-  pub fn tools_call(id: &str, tool_name: &str, args: &Value) -> Self {
+  pub fn tools_call(id: &Value, tool_name: &str, args: &Value) -> Self {
     MCPRequest {
       jsonrpc: "2.0".to_string(),
       method: "tools/call".to_string(),
-      id: id.to_string(),
+      id: id.clone(),
       params: Some(json!(
         {
         "name": tool_name,
@@ -70,11 +70,11 @@ impl MCPRequest {
   /**
    * Request to fetch the list of available resources from `resources/list`.
    */
-  pub fn resources_list(id: &str) -> Self {
+  pub fn resources_list(id: &Value) -> Self {
     MCPRequest {
       jsonrpc: "2.0".to_string(),
       method: "resources/list".to_owned(),
-      id: id.to_string(),
+      id: id.clone(),
       params: None,
     }
   }
@@ -82,11 +82,11 @@ impl MCPRequest {
   /**
    * Request to fetch the list of available resource templates from `resources/templates/list`
    */
-  pub fn resource_templates_list(id: &str) -> Self {
+  pub fn resource_templates_list(id: &Value) -> Self {
     MCPRequest {
       jsonrpc: "2.0".to_string(),
       method: "resources/templates/list".to_owned(),
-      id: id.to_string(),
+      id: id.clone(),
       params: None,
     }
   }
@@ -94,11 +94,11 @@ impl MCPRequest {
   /**
    * Request to read a resource.
    */
-  pub fn resources_read(id: &str, uri: &str) -> Self {
+  pub fn resources_read(id: &Value, uri: &str) -> Self {
     MCPRequest {
       jsonrpc: "2.0".to_string(),
       method: "resources/read".to_owned(),
-      id: id.to_string(),
+      id: id.clone(),
       params: Some(json!(
       {
         "uri": uri.to_string()
@@ -109,11 +109,11 @@ impl MCPRequest {
   /**
    * Request to fetch available prompts.
    */
-  pub fn prompts_list(id: &str) -> Self {
+  pub fn prompts_list(id: &Value) -> Self {
     MCPRequest {
       jsonrpc: "2.0".to_string(),
       method: "prompts/list".to_owned(),
-      id: id.to_owned(),
+      id: id.clone(),
       params: None,
     }
   }
@@ -121,7 +121,7 @@ impl MCPRequest {
   /**
    * Requeset to retrieve a prompt.
    */
-  pub fn get_prompt<'a, I>(id: &str, prompt_name: &str, args: I) -> Self
+  pub fn get_prompt<'a, I>(id: &Value, prompt_name: &str, args: I) -> Self
   where
     I: Iterator<Item = (&'a str, &'a str)>,
   {
@@ -132,7 +132,7 @@ impl MCPRequest {
     MCPRequest {
       jsonrpc: "2.0".to_string(),
       method: "prompts/get".to_owned(),
-      id: id.to_owned(),
+      id: id.clone(),
       params: Some(json!({
         "name": Value::String(prompt_name.to_owned()),
         "arguments": if arguments.len() > 0 { Some(Value::Object(arguments))} else {None}
