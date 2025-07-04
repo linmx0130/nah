@@ -304,10 +304,35 @@ MCP server of `server_name` will be restarted. If no `server_name` is provided, 
       match tool_def {
         Ok(def) => {
           println!("{}", def.name);
-          println!("======");
           def.description.as_ref().and_then(|desc| {
+            println!("= Description =");
             println!("{desc}");
             println!("======");
+            Some(())
+          });
+          def.annotations.as_ref().and_then(|annotations| {
+            println!("= Annotations =");
+            annotations.title.as_ref().and_then(|title| {
+              println!("Title: {}", title);
+              Some(())
+            });
+            annotations.read_only_hint.as_ref().and_then(|h| {
+              println!("Read only hint: {}", h);
+              Some(())
+            });
+            annotations.destructive_hint.as_ref().and_then(|h| {
+              println!("Descructive hint: {}", h);
+              Some(())
+            });
+            annotations.idempotent_hint.as_ref().and_then(|h| {
+              println!("Idempotent hint: {}", h);
+              Some(())
+            });
+            annotations.open_world_hint.as_ref().and_then(|h| {
+              println!("Open world hint: {}", h);
+              Some(())
+            });
+            println!("=====");
             Some(())
           });
         }

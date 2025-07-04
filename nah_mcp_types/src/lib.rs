@@ -42,14 +42,38 @@ pub struct MCPServerCommand {
 }
 
 /**
+ * MCP tool annotations, which contains some optional metadata.
+ *
+ * Following https://modelcontextprotocol.io/docs/concepts/tools#tool-definition-structure
+ */
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MCPToolAnnotations {
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub title: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none", rename = "readOnlyHint")]
+  pub read_only_hint: Option<bool>,
+  #[serde(skip_serializing_if = "Option::is_none", rename = "destructiveHint")]
+  pub destructive_hint: Option<bool>,
+  #[serde(skip_serializing_if = "Option::is_none", rename = "idempotentHint")]
+  pub idempotent_hint: Option<bool>,
+  #[serde(skip_serializing_if = "Option::is_none", rename = "openWorldHint")]
+  pub open_world_hint: Option<bool>,
+}
+
+/**
  * Describe a MCP tool.
+ *
+ * Following https://modelcontextprotocol.io/docs/concepts/tools#tool-definition-structure
  */
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MCPToolDefinition {
   pub name: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub description: Option<String>,
   #[serde(rename = "inputSchema")]
   pub input_schema: Value,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub annotations: Option<MCPToolAnnotations>,
 }
 
 /**
@@ -58,11 +82,11 @@ pub struct MCPToolDefinition {
 #[derive(Debug, Deserialize, Clone)]
 pub struct MCPResourceDefinition {
   pub uri: Option<String>,
-  #[serde(rename = "uriTemplate")]
+  #[serde(rename = "uriTemplate", skip_serializing_if = "Option::is_none")]
   pub uri_template: Option<String>,
   pub name: String,
   pub description: Option<String>,
-  #[serde(rename = "mimeType")]
+  #[serde(rename = "mimeType", skip_serializing_if = "Option::is_none")]
   pub mime_type: Option<String>,
   pub size: Option<usize>,
 }

@@ -23,7 +23,8 @@ impl AbstractMCPServer for ExampleServer {
                 "properties": {
                     "bar": {"type": "string"}
                 }
-            })
+            }),
+            annotations: None
         }]
     }
 
