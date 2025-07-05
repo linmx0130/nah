@@ -161,10 +161,18 @@ pub fn process_chat(context: &mut AppContext) {
               }
               Ok(msg) => {
                 if msg.tool_calls.is_some() {
-                  if chat_context.process_tool_calls(context).is_err() {
-                    println!("Error happened during tool calls, may have wrong result!");
+                  match chat_context.process_tool_calls(context) {
+                    Err(e) => {
+                      if e.code == 201 {
+                        loop_end = true;
+                      } else {
+                        println!("Error happened during tool calls, may have wrong result!");
+                        println!("Error message: {}", e.message);
+                        loop_end = false;
+                      }
+                    }
+                    Ok(()) => loop_end = false,
                   }
-                  loop_end = false;
                 } else {
                   if msg.reasoning_content.is_some() {
                     println!(
@@ -448,9 +456,25 @@ impl ChatContext {
         let name_parts: Vec<&str> = item.function.name.split(".").collect();
         let server_name = name_parts[0];
         let tool_name = name_parts[1];
-        let args: Value = serde_json::from_str(&item.function.arguments).unwrap();
+        let args: Value = match serde_json::from_str(&item.function.arguments) {
+          Ok(args) => args,
+          Err(_e) => {
+            return Err(NahError::invalid_argument_error(
+              "Argument should be a JSON Object, but received an invalid value from the model!",
+            ));
+          }
+        };
 
         let server = app.server_processes.get_mut(server_name).unwrap();
+        let tool_definition = server.get_tool_definition(tool_name)?;
+        if tool_definition.is_destructive() {
+          if !crate::utils::ask_for_user_confirmation(
+              &format!("Model requests to call tool {}, which is annotated as destructive. Do you still want to call? [N/y] > ", tool_definition.name),
+                  &format!("Cancel the tool call!")
+            ) {
+              return Err(NahError::user_cancel_request());
+            }
+        }
         let tool_result = server.call_tool(&tool_name, &args)?;
         let text_content = unpack_mcp_text_contents(server_name, &tool_result)?;
         println!("[Tool: {}]: {}", server_name, text_content);

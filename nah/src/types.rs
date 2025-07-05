@@ -99,4 +99,10 @@ impl NahError {
       message: format!("Invalid response from model: {}", model_name),
     }
   }
+  pub fn user_cancel_request() -> NahError {
+    NahError {
+      code: 201,
+      message: format!("Request was cancelled by the user."),
+    }
+  }
 }

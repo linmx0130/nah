@@ -9,6 +9,7 @@ mod editor;
 mod json_schema;
 mod mcp;
 mod types;
+mod utils;
 
 use clap::Parser;
 use config::{load_config, ModelConfig};
@@ -17,7 +18,7 @@ use mcp::{MCPLocalServerCommand, MCPLocalServerProcess, MCPServer};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{stdin, Read, Write};
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::time::SystemTime;
 use types::NahError;
@@ -357,13 +358,10 @@ MCP server of `server_name` will be restarted. If no `server_name` is provided, 
       match tool_def {
         Ok(def) => {
           if def.is_destructive() {
-            print!("Tool {} is annotated as destructive. Do you still want to call? [N/y] > ", def.name);
-            let _ = std::io::stdout().flush();
-            let mut buf = String::new();
-            let _ = stdin().read_line(&mut buf);
-            let result = buf.trim();
-            if !(result == "Y" || result == "y") {
-              println!("Tool {} has not been called.", def.name);
+            if ! utils::ask_for_user_confirmation(
+            &format!("Tool {} is annotated as destructive. Do you still want to call? [N/y] > ", def.name),
+              &format!("Tool {} has not been called.", def.name),
+            ) {
               return
             }
           }
