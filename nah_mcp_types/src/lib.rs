@@ -76,6 +76,24 @@ pub struct MCPToolDefinition {
   pub annotations: Option<MCPToolAnnotations>,
 }
 
+impl MCPToolDefinition {
+  #[inline]
+  pub fn is_destructive(&self) -> bool {
+    match self.annotations.as_ref().and_then(|a| a.destructive_hint) {
+      Some(true) => true,
+      _ => false,
+    }
+  }
+
+  #[inline]
+  pub fn is_open_world(&self) -> bool {
+    match self.annotations.as_ref().and_then(|a| a.open_world_hint) {
+      Some(true) => true,
+      _ => false,
+    }
+  }
+}
+
 /**
  * Describe a MCP Resource.
  */
