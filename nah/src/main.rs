@@ -322,7 +322,7 @@ MCP server of `server_name` will be restarted. If no `server_name` is provided, 
               Some(())
             });
             annotations.destructive_hint.as_ref().and_then(|h| {
-              println!("Descructive hint: {}", h);
+              println!("Destructive hint: {}", h);
               Some(())
             });
             annotations.idempotent_hint.as_ref().and_then(|h| {
