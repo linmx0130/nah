@@ -9,6 +9,7 @@ mod editor;
 mod json_schema;
 mod mcp;
 mod types;
+mod utils;
 
 use clap::Parser;
 use config::{load_config, ModelConfig};
@@ -304,10 +305,35 @@ MCP server of `server_name` will be restarted. If no `server_name` is provided, 
       match tool_def {
         Ok(def) => {
           println!("{}", def.name);
-          println!("======");
           def.description.as_ref().and_then(|desc| {
+            println!("= Description =");
             println!("{desc}");
             println!("======");
+            Some(())
+          });
+          def.annotations.as_ref().and_then(|annotations| {
+            println!("= Annotations =");
+            annotations.title.as_ref().and_then(|title| {
+              println!("Title: {}", title);
+              Some(())
+            });
+            annotations.read_only_hint.as_ref().and_then(|h| {
+              println!("Read only hint: {}", h);
+              Some(())
+            });
+            annotations.destructive_hint.as_ref().and_then(|h| {
+              println!("Destructive hint: {}", h);
+              Some(())
+            });
+            annotations.idempotent_hint.as_ref().and_then(|h| {
+              println!("Idempotent hint: {}", h);
+              Some(())
+            });
+            annotations.open_world_hint.as_ref().and_then(|h| {
+              println!("Open world hint: {}", h);
+              Some(())
+            });
+            println!("=====");
             Some(())
           });
         }
@@ -331,6 +357,14 @@ MCP server of `server_name` will be restarted. If no `server_name` is provided, 
       let tool_def = server_process.get_tool_definition(tool_name);
       match tool_def {
         Ok(def) => {
+          if def.is_destructive() {
+            if ! utils::ask_for_user_confirmation(
+            &format!("Tool {} is annotated as destructive. Do you still want to call? [N/y] > ", def.name),
+              &format!("Tool {} has not been called.", def.name),
+            ) {
+              return
+            }
+          }
           // create a temporary file for the request
           let param_template = json_schema::create_instance_template(&def.input_schema);
           match param_template {
