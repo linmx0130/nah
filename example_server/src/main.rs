@@ -1,6 +1,6 @@
 /* This file is released in the public domain.
  */
-use nah_mcp_types::{MCPResourceDefinition, MCPToolDefinition};
+use nah_mcp_types::{MCPResourceContent, MCPResourceDefinition, MCPToolDefinition};
 use nah_server::*;
 use serde_json::{json, Value};
 
@@ -30,8 +30,8 @@ impl AbstractMCPServer for ExampleServer {
 
     fn on_tool_call(
         &mut self,
-        name: &str,
-        args: Option<&serde_json::Map<String, Value>>,
+        _name: &str,
+        _args: Option<&serde_json::Map<String, Value>>,
     ) -> String {
         "I don't know what you are requesting because I'm only an example.".to_string()
     }
@@ -44,6 +44,16 @@ impl AbstractMCPServer for ExampleServer {
             None,
             None,
         )]
+    }
+
+    fn on_resources_read(&self, uri: &str) -> Vec<MCPResourceContent> {
+        let content = format!("Text file: {}", uri);
+        vec![MCPResourceContent {
+            uri: uri.to_string(),
+            text: Some(content),
+            mime: None,
+            blob: None,
+        }]
     }
 }
 

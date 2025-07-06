@@ -108,7 +108,7 @@ where
     T: AbstractMCPServer,
 {
     let id = &request.id;
-    let tools_list: Vec<Value> = server
+    let resources_list: Vec<Value> = server
         .get_resources_list()
         .into_iter()
         .filter(|v| v.uri.is_some())
@@ -116,9 +116,37 @@ where
         .map(|v| serde_json::to_value(v).unwrap())
         .collect();
     let mut result_map = serde_json::Map::new();
-    result_map.insert("resources".to_string(), Value::Array(tools_list));
+    result_map.insert("resources".to_string(), Value::Array(resources_list));
     let result = Value::Object(result_map);
     MCPResponse::new(id.clone(), Some(result), None)
+}
+
+/**
+ * Process resources/read request.
+ */
+pub fn process_resources_read<T>(server: &mut T, request: MCPRequest) -> MCPResponse
+where
+    T: AbstractMCPServer,
+{
+    let id = &request.id;
+    let uri: &str = match request
+        .params
+        .as_ref()
+        .and_then(|params| params.as_object())
+        .and_then(|params| params.get("uri"))
+        .and_then(|v| v.as_str())
+    {
+        Some(uri) => uri,
+        None => {
+            return invalid_params_error_response(
+                id,
+                "Cannot find uri in the resources/read request".to_string(),
+            );
+        }
+    };
+
+    let contents = server.on_resources_read(uri);
+    MCPResponse::new(id.clone(), Some(json!({"contents": contents})), None)
 }
 
 fn invalid_params_error_response(id: &Value, message: String) -> MCPResponse {
