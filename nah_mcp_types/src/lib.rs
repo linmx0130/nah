@@ -97,16 +97,54 @@ impl MCPToolDefinition {
 /**
  * Describe a MCP Resource.
  */
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MCPResourceDefinition {
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub uri: Option<String>,
   #[serde(rename = "uriTemplate", skip_serializing_if = "Option::is_none")]
   pub uri_template: Option<String>,
   pub name: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub description: Option<String>,
   #[serde(rename = "mimeType", skip_serializing_if = "Option::is_none")]
   pub mime_type: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub size: Option<usize>,
+}
+
+impl MCPResourceDefinition {
+  /**
+   * Whether this resource definition is valid.
+   */
+  pub fn is_valid_resource_definition(&self) -> bool {
+    if self.uri.is_none() && self.uri_template.is_none() {
+      return false;
+    }
+    if self.uri.is_some() && self.uri_template.is_some() {
+      return false;
+    }
+    if self.uri_template.is_some() && self.size.is_some() {
+      return false;
+    }
+    return true;
+  }
+
+  pub fn direct_resource(
+    uri: String,
+    name: String,
+    description: Option<String>,
+    mime_type: Option<String>,
+    size: Option<usize>,
+  ) -> MCPResourceDefinition {
+    MCPResourceDefinition {
+      uri: Some(uri),
+      name,
+      description,
+      mime_type,
+      size,
+      uri_template: None,
+    }
+  }
 }
 
 /**

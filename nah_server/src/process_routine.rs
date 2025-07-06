@@ -7,6 +7,7 @@ use crate::AbstractMCPServer;
 use nah_mcp_types::request::MCPRequest;
 use nah_mcp_types::MCPResponse;
 use serde_json::{json, Value};
+
 /**
  * Process the initialize request
  */
@@ -19,6 +20,9 @@ where
         "protocolVersion": "2024-11-05",
         "capabilities": {
             "tools": {
+                "listChanged": false
+            },
+            "resources": {
                 "listChanged": false
             }
         }
@@ -94,6 +98,27 @@ where
         })),
         None,
     )
+}
+
+/**
+ * Process resources/list request.
+ */
+pub fn process_resources_list<T>(server: &mut T, request: MCPRequest) -> MCPResponse
+where
+    T: AbstractMCPServer,
+{
+    let id = &request.id;
+    let tools_list: Vec<Value> = server
+        .get_resources_list()
+        .into_iter()
+        .filter(|v| v.uri.is_some())
+        .filter(|v| v.is_valid_resource_definition())
+        .map(|v| serde_json::to_value(v).unwrap())
+        .collect();
+    let mut result_map = serde_json::Map::new();
+    result_map.insert("resources".to_string(), Value::Array(tools_list));
+    let result = Value::Object(result_map);
+    MCPResponse::new(id.clone(), Some(result), None)
 }
 
 fn invalid_params_error_response(id: &Value, message: String) -> MCPResponse {

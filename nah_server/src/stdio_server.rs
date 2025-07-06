@@ -5,7 +5,8 @@
  */
 
 use crate::process_routine::{
-    invalid_request, process_initialize, process_tools_call, process_tools_list,
+    invalid_request, process_initialize, process_resources_list, process_tools_call,
+    process_tools_list,
 };
 use crate::AbstractMCPServer;
 use nah_mcp_types::request::MCPRequest;
@@ -51,6 +52,7 @@ where
             "initialize" => process_initialize(server, request),
             "tools/list" => process_tools_list(server, request),
             "tools/call" => process_tools_call(server, request),
+            "resources/list" => process_resources_list(server, request),
             _ => invalid_request(&request.id, format!("Unknown method: {}", request.method)),
         };
         send_response(response)?;
