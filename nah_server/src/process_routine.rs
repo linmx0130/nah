@@ -122,6 +122,30 @@ where
 }
 
 /**
+ * Process resources/templates/list request.
+ */
+pub fn process_resources_templates_list<T>(server: &mut T, request: MCPRequest) -> MCPResponse
+where
+    T: AbstractMCPServer,
+{
+    let id = &request.id;
+    let resources_list: Vec<Value> = server
+        .get_resources_list()
+        .into_iter()
+        .filter(|v| v.uri_template.is_some())
+        .filter(|v| v.is_valid_resource_definition())
+        .map(|v| serde_json::to_value(v).unwrap())
+        .collect();
+    let mut result_map = serde_json::Map::new();
+    result_map.insert(
+        "resourceTemplates".to_string(),
+        Value::Array(resources_list),
+    );
+    let result = Value::Object(result_map);
+    MCPResponse::new(id.clone(), Some(result), None)
+}
+
+/**
  * Process resources/read request.
  */
 pub fn process_resources_read<T>(server: &mut T, request: MCPRequest) -> MCPResponse
