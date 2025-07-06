@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
-use nah_mcp_types::MCPToolDefinition;
+use nah_mcp_types::{MCPResourceContent, MCPResourceDefinition, MCPToolDefinition};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -44,4 +44,17 @@ pub trait AbstractMCPServer {
      */
     fn on_tool_call(&mut self, name: &str, args: Option<&serde_json::Map<String, Value>>)
         -> String;
+
+    /**
+     * Return a Vec of all resource definitions.
+     */
+    fn get_resources_list(&self) -> Vec<MCPResourceDefinition>;
+
+    /**
+     * Respond to the resource read requests. Return a list of resource contents.
+     *
+     * Args:
+     * * `uri`: the request URI
+     */
+    fn on_resources_read(&self, uri: &str) -> Vec<MCPResourceContent>;
 }
