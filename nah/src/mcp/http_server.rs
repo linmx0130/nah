@@ -42,10 +42,37 @@ impl MCPServer for MCPHTTPServerConnection {
     req = req.header("Content-Type", "application/json");
     req = req.header("Accept", "application/json,text/event-stream");
     req = req.body(data_str);
-    let res = match self
-      .tokio_runtime
-      .block_on(async { req.send().await?.text().await })
-    {
+    let response = match self.tokio_runtime.block_on(async { req.send().await }) {
+      Ok(response) => response,
+      Err(_e) => {
+        return Err(NahError::mcp_server_communication_error(&self.name));
+      }
+    };
+    let content_type = response.headers().get("Content-Type");
+
+    let json_content = match content_type {
+      Some(type_value) => {
+        let content_type = type_value.as_bytes();
+        match content_type {
+          b"application/json" => self.tokio_runtime.block_on(async { response.text().await }),
+          _ => {
+            let type_str = type_value.to_str().unwrap_or("UNKNOWN");
+            return Err(NahError::mcp_server_error(
+              &self.name,
+              &format!("Unknown content type for MCP response: {}", type_str),
+            ));
+          }
+        }
+      }
+      None => {
+        return Err(NahError::mcp_server_error(
+          &self.name,
+          &format!("Missing content type for MCP response"),
+        ));
+      }
+    };
+
+    let res = match json_content {
       Ok(s) => s,
       Err(e) => {
         return Err(NahError::mcp_server_error(
