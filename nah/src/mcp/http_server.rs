@@ -5,10 +5,12 @@
  */
 use crate::{mcp::MCPServer, types::NahError};
 use nah_mcp_types::{
-  request::MCPRequest, MCPPromptDefinition, MCPResourceDefinition, MCPResponse, MCPToolDefinition,
+  notification::MCPNotification, request::MCPRequest, MCPPromptDefinition, MCPResourceDefinition,
+  MCPResponse, MCPToolDefinition,
 };
 use reqwest::Client;
 use serde::Deserialize;
+use serde_json::Value;
 use std::{collections::HashMap, time::Duration};
 use tokio::runtime::{Builder, Runtime};
 
@@ -27,6 +29,7 @@ pub struct MCPHTTPServerConnection {
   tool_cache: HashMap<String, MCPToolDefinition>,
   resource_cache: HashMap<String, MCPResourceDefinition>,
   prompt_cache: HashMap<String, MCPPromptDefinition>,
+  session_id: Option<String>,
 }
 
 impl MCPServer for MCPHTTPServerConnection {
@@ -41,27 +44,97 @@ impl MCPServer for MCPHTTPServerConnection {
     }
     req = req.header("Content-Type", "application/json");
     req = req.header("Accept", "application/json,text/event-stream");
+    req = req.header("MCP-Protocol-Version", "2025-06-18");
+    if self.session_id.is_some() {
+      req = req.header("Mcp-Session-Id", self.session_id.as_ref().unwrap());
+    }
     req = req.body(data_str);
-    let res = match self
-      .tokio_runtime
-      .block_on(async { req.send().await?.text().await })
-    {
-      Ok(s) => s,
-      Err(e) => {
+    let response = match self.tokio_runtime.block_on(async { req.send().await }) {
+      Ok(response) => response,
+      Err(_e) => {
+        return Err(NahError::mcp_server_communication_error(&self.name));
+      }
+    };
+    let session_id = response.headers().get("Mcp-Session-Id");
+    if session_id.is_some() && self.session_id.is_none() {
+      let new_session_id = session_id.unwrap().to_str().unwrap().to_string();
+      println!(
+        "Initialized a new session with {}, id={}",
+        self.name, new_session_id
+      );
+      self.session_id = Some(new_session_id);
+    }
+    let content_type = response.headers().get("Content-Type");
+
+    let json_content = match content_type {
+      Some(type_value) => {
+        let content_type = type_value.as_bytes();
+        match content_type {
+          b"application/json" => match self.tokio_runtime.block_on(async { response.text().await })
+          {
+            Ok(s) => s,
+            Err(_) => {
+              return Err(NahError::mcp_server_invalid_response(&self.name));
+            }
+          },
+          b"text/event-stream" => {
+            let all_response_data: String =
+              match self.tokio_runtime.block_on(async { response.text().await }) {
+                Ok(s) => s,
+                Err(_) => {
+                  return Err(NahError::mcp_server_invalid_response(&self.name));
+                }
+              };
+            match all_response_data
+              .split("\n")
+              .filter(|s| s.starts_with("data: "))
+              .next()
+            {
+              Some(s) => s.trim_start_matches("data: ").trim().to_string(),
+              None => {
+                return Err(NahError::mcp_server_invalid_response(&self.name));
+              }
+            }
+          }
+          _ => {
+            let type_str = type_value.to_str().unwrap_or("UNKNOWN");
+            return Err(NahError::mcp_server_error(
+              &self.name,
+              &format!("Unknown content type for MCP response: {}", type_str),
+            ));
+          }
+        }
+      }
+      None => {
         return Err(NahError::mcp_server_error(
           &self.name,
-          &format!("Error in fetching MCP remote server response: {}", e),
+          &format!("Missing content type for MCP response"),
         ));
       }
     };
-    match serde_json::from_str::<MCPResponse>(&res) {
+
+    match serde_json::from_str::<MCPResponse>(&json_content) {
       Ok(r) => Ok(r),
       Err(_e) => Err(NahError::mcp_server_invalid_response(&self.name)),
     }
   }
 
   fn kill(&mut self) -> std::io::Result<()> {
-    Ok(())
+    match &self.session_id {
+      None => Ok(()),
+      Some(session_id) => {
+        let mut req = self.http_client.delete(self.url.to_owned());
+        for (k, v) in self.headers.iter() {
+          req = req.header(k, v);
+        }
+        req = req.header("MCP-Protocol-Version", "2025-06-18");
+        req = req.header("Mcp-Session-Id", session_id);
+        match self.tokio_runtime.block_on(async { req.send().await }) {
+          Ok(_) => Ok(()),
+          Err(e) => std::io::Result::Err(std::io::Error::other(e)),
+        }
+      }
+    }
   }
 
   fn set_timeout(&mut self, timeout_ms: u64) {
@@ -101,6 +174,35 @@ impl MCPServer for MCPHTTPServerConnection {
 }
 
 impl MCPHTTPServerConnection {
+  fn send_notification(&mut self, request: MCPNotification) -> Result<(), crate::types::NahError> {
+    let data_str = serde_json::to_string(&request).unwrap();
+    let mut req = self.http_client.post(self.url.to_owned());
+    for (k, v) in self.headers.iter() {
+      req = req.header(k, v);
+    }
+    req = req.header("Content-Type", "application/json");
+    req = req.header("Accept", "application/json,text/event-stream");
+    req = req.header("MCP-Protocol-Version", "2025-06-18");
+    if self.session_id.is_some() {
+      req = req.header("Mcp-Session-Id", self.session_id.as_ref().unwrap());
+    }
+    req = req.body(data_str);
+    let response = self.tokio_runtime.block_on(async { req.send().await });
+    match response {
+      Ok(r) => {
+        if r.status().is_success() {
+          Ok(())
+        } else {
+          Err(NahError::mcp_server_error(
+            &self.name,
+            "Initialization is not success.",
+          ))
+        }
+      }
+      Err(_e) => Err(NahError::mcp_server_communication_error(&self.name)),
+    }
+  }
+
   pub fn init(name: &str, config: &MCPRemoteServerConfig) -> Result<Self, NahError> {
     let tokio_runtime = match Builder::new_current_thread()
       .enable_io()
@@ -114,7 +216,7 @@ impl MCPHTTPServerConnection {
         ));
       }
     };
-    Ok(MCPHTTPServerConnection {
+    let mut conn = MCPHTTPServerConnection {
       name: name.to_string(),
       url: config.url.to_owned(),
       headers: config.headers.to_owned(),
@@ -123,6 +225,17 @@ impl MCPHTTPServerConnection {
       tool_cache: HashMap::new(),
       resource_cache: HashMap::new(),
       prompt_cache: HashMap::new(),
-    })
+      session_id: None,
+    };
+    let initialize_request = MCPRequest::initialize(
+      &Value::String(uuid::Uuid::new_v4().to_string()),
+      "nah",
+      "0.1",
+    );
+    conn.send_and_wait_for_response(initialize_request)?;
+    let initialized_notification = MCPNotification::initialized();
+    conn.send_notification(initialized_notification)?;
+
+    Ok(conn)
   }
 }

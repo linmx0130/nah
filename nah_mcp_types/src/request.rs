@@ -23,7 +23,7 @@ impl MCPRequest {
    */
   pub fn initialize(id: &Value, client_name: &str, client_version: &str) -> Self {
     let params = Some(json!({
-        "protocolVersion": "2024-11-05",
+        "protocolVersion": "2025-06-18",
         "capabilities": json!({}),
         "clientInfo": json!({
             "name": client_name,
