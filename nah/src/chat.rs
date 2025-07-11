@@ -28,9 +28,11 @@ use tokio::runtime::{Builder, Runtime};
 struct ChatMessage {
   pub role: String,
   pub content: String,
-  #[serde(rename = "reasoningContent")]
+  #[serde(rename = "reasoningContent", skip_serializing_if = "Option::is_none")]
   pub reasoning_content: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub tool_call_id: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
   pub tool_calls: Option<Vec<ToolCallRequest>>,
 }
 

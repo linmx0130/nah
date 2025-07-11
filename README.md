@@ -16,8 +16,8 @@ For Qwen3 models where you have controls on whether to enable thinkings, using f
 ```json
 {
     "model": {
-        "baseUrl": "https://openrouter.ai/api/v1",
-        "model": "qwen/qwen3-30b-a3b:free",
+        "baseUrl": "https://llm.api.provider.site/api/v1",
+        "model": "qwen/qwen3-32b",
         "authToken": "<AUTH_TOKEN_HERE>",
         "extraParams": {
             "enable_thinking": true
