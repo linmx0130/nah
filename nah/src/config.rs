@@ -39,22 +39,22 @@ pub struct ModelConfig {
 pub fn load_config(path: PathBuf) -> Result<NahConfig, NahError> {
   let file = match File::open(&path) {
     Ok(f) => f,
-    Err(_) => {
-      return Err(NahError::io_error(&format!(
-        "Failed to open {}",
-        path.display()
-      )))
+    Err(e) => {
+      return Err(NahError::io_error(
+        &format!("Failed to open {}", path.display()),
+        Some(Box::new(e)),
+      ));
     }
   };
 
   let reader = BufReader::new(file);
   let data: Value = match serde_json::from_reader(reader) {
     Ok(v) => v,
-    Err(_) => {
-      return Err(NahError::io_error(&format!(
-        "Invalid mcp server config file {}",
-        path.display()
-      )))
+    Err(e) => {
+      return Err(NahError::io_error(
+        &format!("Invalid mcp server config file {}", path.display()),
+        Some(Box::new(e)),
+      ))
     }
   };
 
@@ -94,38 +94,38 @@ fn load_mcp_servers(
         if value.as_object().is_some_and(|v| v.contains_key("command")) {
           let server_command = match serde_json::from_value(value.clone()) {
             Ok(v) => v,
-            Err(_) => {
-              return Err(NahError::invalid_value(&format!(
-                "invalid server command for tool {}",
-                key
-              )))
+            Err(e) => {
+              return Err(NahError::invalid_value(
+                &format!("invalid server command for tool {}", key),
+                Some(Box::new(e)),
+              ))
             }
           };
           mcp_servers.insert(key.to_string(), server_command);
         } else if value.as_object().is_some_and(|v| v.contains_key("url")) {
           let remote_server_config = match serde_json::from_value(value.clone()) {
             Ok(v) => v,
-            Err(_) => {
-              return Err(NahError::invalid_value(&format!(
-                "invalid server command for tool {}",
-                key
-              )))
+            Err(e) => {
+              return Err(NahError::invalid_value(
+                &format!("invalid server command for tool {}", key),
+                Some(Box::new(e)),
+              ))
             }
           };
           mcp_remote_servers.insert(key.to_string(), remote_server_config);
         } else {
-          return Err(NahError::invalid_value(&format!(
-            "invalid server command for tool {}",
-            key
-          )));
+          return Err(NahError::invalid_value(
+            &format!("invalid server command for tool {}", key),
+            None,
+          ));
         }
       }
       Ok((mcp_servers, mcp_remote_servers))
     }
-    _ => Err(NahError::io_error(&format!(
-      "Invalid mcp server config file {}",
-      path.display()
-    ))),
+    _ => Err(NahError::io_error(
+      &format!("Invalid mcp server config file {}", path.display()),
+      None,
+    )),
   }
 }
 

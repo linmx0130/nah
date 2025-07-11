@@ -90,13 +90,14 @@ fn get_type_name(schema: &Value) -> Result<JSONSchemaTypeName, NahError> {
       "number" => Ok(JSONSchemaTypeName::Number),
       "boolean" => Ok(JSONSchemaTypeName::Boolean),
       "null" => Ok(JSONSchemaTypeName::Null),
-      _ => Err(NahError::received_invalid_json_schema(&format!(
-        "unknown type name : {}",
-        type_name
-      ))),
+      _ => Err(NahError::received_invalid_json_schema(
+        &format!("unknown type name : {}", type_name),
+        None,
+      )),
     },
     None => Err(NahError::received_invalid_json_schema(
       "type name not found",
+      None,
     )),
   }
 }
@@ -113,6 +114,7 @@ fn get_properties(schema: &Value) -> Result<Vec<(&String, &Value)>, NahError> {
     None => {
       return Err(NahError::received_invalid_json_schema(
         "properties not found on an object",
+        None,
       ));
     }
     Some(p) => p,

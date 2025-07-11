@@ -51,8 +51,11 @@ impl MCPServer for MCPHTTPServerConnection {
     req = req.body(data_str);
     let response = match self.tokio_runtime.block_on(async { req.send().await }) {
       Ok(response) => response,
-      Err(_e) => {
-        return Err(NahError::mcp_server_communication_error(&self.name));
+      Err(e) => {
+        return Err(NahError::mcp_server_communication_error(
+          &self.name,
+          Some(Box::new(e)),
+        ));
       }
     };
     let session_id = response.headers().get("Mcp-Session-Id");
@@ -73,16 +76,22 @@ impl MCPServer for MCPHTTPServerConnection {
           b"application/json" => match self.tokio_runtime.block_on(async { response.text().await })
           {
             Ok(s) => s,
-            Err(_) => {
-              return Err(NahError::mcp_server_invalid_response(&self.name));
+            Err(e) => {
+              return Err(NahError::mcp_server_invalid_response(
+                &self.name,
+                Some(Box::new(e)),
+              ));
             }
           },
           b"text/event-stream" => {
             let all_response_data: String =
               match self.tokio_runtime.block_on(async { response.text().await }) {
                 Ok(s) => s,
-                Err(_) => {
-                  return Err(NahError::mcp_server_invalid_response(&self.name));
+                Err(e) => {
+                  return Err(NahError::mcp_server_invalid_response(
+                    &self.name,
+                    Some(Box::new(e)),
+                  ));
                 }
               };
             match all_response_data
@@ -92,7 +101,7 @@ impl MCPServer for MCPHTTPServerConnection {
             {
               Some(s) => s.trim_start_matches("data: ").trim().to_string(),
               None => {
-                return Err(NahError::mcp_server_invalid_response(&self.name));
+                return Err(NahError::mcp_server_invalid_response(&self.name, None));
               }
             }
           }
@@ -101,6 +110,7 @@ impl MCPServer for MCPHTTPServerConnection {
             return Err(NahError::mcp_server_error(
               &self.name,
               &format!("Unknown content type for MCP response: {}", type_str),
+              None,
             ));
           }
         }
@@ -109,13 +119,17 @@ impl MCPServer for MCPHTTPServerConnection {
         return Err(NahError::mcp_server_error(
           &self.name,
           &format!("Missing content type for MCP response"),
+          None,
         ));
       }
     };
 
     match serde_json::from_str::<MCPResponse>(&json_content) {
       Ok(r) => Ok(r),
-      Err(_e) => Err(NahError::mcp_server_invalid_response(&self.name)),
+      Err(e) => Err(NahError::mcp_server_invalid_response(
+        &self.name,
+        Some(Box::new(e)),
+      )),
     }
   }
 
@@ -196,10 +210,14 @@ impl MCPHTTPServerConnection {
           Err(NahError::mcp_server_error(
             &self.name,
             "Initialization is not success.",
+            None,
           ))
         }
       }
-      Err(_e) => Err(NahError::mcp_server_communication_error(&self.name)),
+      Err(e) => Err(NahError::mcp_server_communication_error(
+        &self.name,
+        Some(Box::new(e)),
+      )),
     }
   }
 
@@ -210,9 +228,10 @@ impl MCPHTTPServerConnection {
       .build()
     {
       Ok(r) => r,
-      Err(_e) => {
+      Err(e) => {
         return Err(NahError::io_error(
           "Failed to create tokio runtime for network connection",
+          Some(Box::new(e)),
         ));
       }
     };

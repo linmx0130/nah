@@ -17,12 +17,18 @@ pub fn launch_editor(filename: &str) -> Result<(), NahError> {
       if exit_status.success() {
         Ok(())
       } else {
-        Err(NahError::editor_error(&format!(
-          "return value of the editor is {}",
-          exit_status.code().unwrap_or(0)
-        )))
+        Err(NahError::editor_error(
+          &format!(
+            "return value of the editor is {}",
+            exit_status.code().unwrap_or(0)
+          ),
+          None,
+        ))
       }
     }
-    Err(e) => Err(NahError::editor_error(&format!("{}", e))),
+    Err(e) => Err(NahError::editor_error(
+      "Error in launching editor",
+      Some(Box::new(e)),
+    )),
   }
 }

@@ -250,13 +250,19 @@ impl ChatContext {
     let message: Result<ChatMessage, NahError> = self.tokio_runtime.block_on(async {
       let mut res = match req_stream.send().await {
         Ok(r) => r,
-        Err(_e) => return Err(NahError::model_invalid_response(&self.model_config.model)),
+        Err(e) => {
+          return Err(NahError::model_invalid_response(
+            &self.model_config.model,
+            Some(Box::new(e)),
+          ))
+        }
       };
       if !res.status().is_success() {
         let code = res.status().as_u16();
         return Err(NahError::model_error(
           &self.model_config.model,
           &format!("Model server responded with error: HTTP status {}", code),
+          None,
         ));
       }
       let mut message = ChatMessage {
@@ -274,7 +280,12 @@ impl ChatContext {
         let chunk = match res.chunk().await {
           Ok(Some(chunk)) => chunk,
           Ok(None) => continue,
-          Err(_e) => return Err(NahError::model_invalid_response(&self.model_config.model)),
+          Err(e) => {
+            return Err(NahError::model_invalid_response(
+              &self.model_config.model,
+              Some(Box::new(e)),
+            ))
+          }
         };
         let delta = self.get_model_response_chunk(chunk);
         match delta {
@@ -302,7 +313,10 @@ impl ChatContext {
         self.push_message(msg);
         Ok(&self.messages[self.messages.len() - 1])
       }
-      Err(_e) => Err(NahError::model_invalid_response(&self.model_config.model)),
+      Err(e) => Err(NahError::model_invalid_response(
+        &self.model_config.model,
+        Some(Box::new(e)),
+      )),
     }
   }
 
@@ -458,9 +472,10 @@ impl ChatContext {
         let tool_name = name_parts[1];
         let args: Value = match serde_json::from_str(&item.function.arguments) {
           Ok(args) => args,
-          Err(_e) => {
+          Err(e) => {
             return Err(NahError::invalid_argument_error(
               "Argument should be a JSON Object, but received an invalid value from the model!",
+              Some(Box::new(e)),
             ));
           }
         };
@@ -511,7 +526,7 @@ fn unpack_mcp_text_contents(server_name: &str, result: &Value) -> Result<String,
   {
     Some(p) => p,
     None => {
-      return Err(NahError::mcp_server_invalid_response(server_name));
+      return Err(NahError::mcp_server_invalid_response(server_name, None));
     }
   };
   let mut text = String::new();
@@ -537,15 +552,24 @@ fn launch_editor_for_user_message() -> Result<String, NahError> {
     Ok(mut f) => {
       let _ = f.write(b"# Draft your message here. Lines start wtih # will be ignored.\n");
     }
-    Err(_) => {
-      return Err(NahError::io_error("Failed to open the user message file."));
+    Err(e) => {
+      return Err(NahError::io_error(
+        "Failed to open the user message file.",
+        Some(Box::new(e)),
+      ));
     }
   }
   let _ = launch_editor(MESSAGE_FILE_PATH)?;
   let mut file = open_file_or_throw()?;
   let mut buf: String = String::new();
-  if file.read_to_string(&mut buf).is_err() {
-    return Err(NahError::io_error("Failed to open the user message file."));
+  match file.read_to_string(&mut buf) {
+    Ok(_) => {}
+    Err(e) => {
+      return Err(NahError::io_error(
+        "Failed to open the user message file.",
+        Some(Box::new(e)),
+      ));
+    }
   }
   let mut message = String::new();
   buf
@@ -561,7 +585,12 @@ fn launch_editor_for_user_message() -> Result<String, NahError> {
 fn open_file_or_throw() -> Result<File, NahError> {
   let file = match File::open(&MESSAGE_FILE_PATH) {
     Ok(f) => f,
-    Err(_) => return Err(NahError::io_error("Failed to open the user message file")),
+    Err(e) => {
+      return Err(NahError::io_error(
+        "Failed to open the user message file",
+        Some(Box::new(e)),
+      ))
+    }
   };
   Ok(file)
 }
