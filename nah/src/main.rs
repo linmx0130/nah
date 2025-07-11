@@ -607,7 +607,7 @@ MCP server of `server_name` will be restarted. If no `server_name` is provided, 
                 let argument_value = load_json_arguments(&temp_filename);
                 let arguments= match argument_value.and_then(|v| match v.as_object() {
                   Some(v) => Ok(v.clone()),
-                  None => Err(NahError::invalid_argument_error("Arguments should be a JSON Object!"))
+                  None => Err(NahError::invalid_argument_error("Arguments should be a JSON Object!", None))
                 }) {
                   Err(e) => {
                     println!("{}", e);
@@ -723,10 +723,19 @@ fn load_json_arguments(filename: &str) -> Result<Value, NahError> {
   let mut buf = String::new();
   let mut file = match File::open(&filename) {
     Ok(f) => f,
-    Err(_) => return Err(NahError::io_error("Failed to open the argument file")),
+    Err(e) => {
+      return Err(NahError::io_error(
+        "Failed to open the argument file",
+        Some(Box::new(e)),
+      ))
+    }
   };
-  if file.read_to_string(&mut buf).is_err() {
-    return Err(NahError::io_error("Failed to open the argument file."));
+  let read_result = file.read_to_string(&mut buf);
+  if read_result.is_err() {
+    return Err(NahError::io_error(
+      "Failed to open the argument file.",
+      Some(Box::new(read_result.err().unwrap())),
+    ));
   }
   let mut arg_json_buf = String::new();
   buf
@@ -736,9 +745,10 @@ fn load_json_arguments(filename: &str) -> Result<Value, NahError> {
       arg_json_buf.push_str(l);
     });
   match serde_json::from_str::<Value>(&arg_json_buf) {
-    Err(_) => {
+    Err(e) => {
       return Err(NahError::invalid_argument_error(
         "Provided argument is invalid in JSON Format",
+        Some(Box::new(e)),
       ));
     }
     Ok(args) => Ok(args),

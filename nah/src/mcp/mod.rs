@@ -111,10 +111,10 @@ pub trait MCPServer {
       self.fetch_tools()?;
       match self._get_tool_map().get(tool_name) {
         Some(p) => Ok(p),
-        None => Err(NahError::invalid_value(&format!(
-          "Invalid tool name: {}",
-          tool_name
-        ))),
+        None => Err(NahError::invalid_value(
+          &format!("Invalid tool name: {}", tool_name),
+          None,
+        )),
       }
     }
   }
@@ -135,6 +135,7 @@ pub trait MCPServer {
         if resources.is_none() {
           return Err(NahError::mcp_server_invalid_response(
             self.get_server_name(),
+            None,
           ));
         }
         let mut resource_map = HashMap::new();
@@ -172,6 +173,7 @@ pub trait MCPServer {
         if resources.is_none() {
           return Err(NahError::mcp_server_invalid_response(
             self.get_server_name(),
+            None,
           ));
         }
         let result: Vec<MCPResourceDefinition> = resources
@@ -199,10 +201,10 @@ pub trait MCPServer {
       self.fetch_resources_list()?;
       match self._get_resource_map().get(uri) {
         Some(p) => Ok(p),
-        None => Err(NahError::invalid_value(&format!(
-          "Invalid resource uri: {}",
-          uri
-        ))),
+        None => Err(NahError::invalid_value(
+          &format!("Invalid resource uri: {}", uri),
+          None,
+        )),
       }
     }
   }
@@ -254,10 +256,11 @@ pub trait MCPServer {
     let result = match response.result {
       None => {
         return Err(match response.error {
-          None => NahError::mcp_server_communication_error(self.get_server_name()),
+          None => NahError::mcp_server_communication_error(self.get_server_name(), None),
           Some(err) => NahError::mcp_server_error(
             self.get_server_name(),
             &serde_json::to_string_pretty(&err).unwrap(),
+            None,
           ),
         });
       }
@@ -270,6 +273,7 @@ pub trait MCPServer {
           None => {
             return Err(NahError::mcp_server_invalid_response(
               self.get_server_name(),
+              None,
             ));
           }
           Some(t) => t,
@@ -301,10 +305,10 @@ pub trait MCPServer {
       self.fetch_prompts_list()?;
       match self._get_prompt_map().get(prompt_name) {
         Some(p) => Ok(p),
-        None => Err(NahError::invalid_value(&format!(
-          "Invalid prompt name: {}",
-          prompt_name
-        ))),
+        None => Err(NahError::invalid_value(
+          &format!("Invalid prompt name: {}", prompt_name),
+          None,
+        )),
       }
     }
   }
@@ -332,10 +336,12 @@ pub trait MCPServer {
 
   fn parse_response_error(&self, response: &MCPResponse) -> NahError {
     match &response.error {
-      Some(e) => {
-        NahError::mcp_server_error(self.get_server_name(), &serde_json::to_string(e).unwrap())
-      }
-      None => NahError::mcp_server_error(self.get_server_name(), "unknown error"),
+      Some(e) => NahError::mcp_server_error(
+        self.get_server_name(),
+        &serde_json::to_string(e).unwrap(),
+        None,
+      ),
+      None => NahError::mcp_server_error(self.get_server_name(), "unknown error", None),
     }
   }
 
@@ -353,10 +359,12 @@ pub(in crate::mcp) fn parse_tools_list_from_response(
   match response.result {
     None => {
       return Err(match response.error {
-        None => NahError::mcp_server_communication_error(server_name),
-        Some(err) => {
-          NahError::mcp_server_error(server_name, &serde_json::to_string_pretty(&err).unwrap())
-        }
+        None => NahError::mcp_server_communication_error(server_name, None),
+        Some(err) => NahError::mcp_server_error(
+          server_name,
+          &serde_json::to_string_pretty(&err).unwrap(),
+          None,
+        ),
       });
     }
     Some(res) => {
@@ -366,7 +374,7 @@ pub(in crate::mcp) fn parse_tools_list_from_response(
         .and_then(|v| v.as_array())
       {
         None => {
-          return Err(NahError::mcp_server_invalid_response(server_name));
+          return Err(NahError::mcp_server_invalid_response(server_name, None));
         }
         Some(t) => t,
       };
@@ -374,8 +382,11 @@ pub(in crate::mcp) fn parse_tools_list_from_response(
       for item in tools.iter() {
         let tool: MCPToolDefinition = match serde_json::from_value(item.clone()) {
           Ok(t) => t,
-          Err(_e) => {
-            return Err(NahError::mcp_server_invalid_response(server_name));
+          Err(e) => {
+            return Err(NahError::mcp_server_invalid_response(
+              server_name,
+              Some(Box::new(e)),
+            ));
           }
         };
         result.push(tool);

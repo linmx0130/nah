@@ -74,7 +74,10 @@ impl MCPServer for MCPLocalServerProcess {
           if incoming_id == id {
             return match serde_json::from_value::<MCPResponse>(incoming_msg) {
               Ok(resp) => Ok(resp),
-              Err(_e) => Err(NahError::mcp_server_invalid_response(&self.server_name)),
+              Err(e) => Err(NahError::mcp_server_invalid_response(
+                &self.server_name,
+                Some(Box::new(e)),
+              )),
             };
           }
         }
@@ -163,11 +166,14 @@ impl MCPLocalServerProcess {
       .open(history_file_path.as_path())
     {
       Ok(f) => f,
-      Err(_) => {
-        return Err(NahError::io_error(&format!(
-          "Failed to create history file: {}",
-          history_file_path.display()
-        )));
+      Err(e) => {
+        return Err(NahError::io_error(
+          &format!(
+            "Failed to create history file: {}",
+            history_file_path.display(),
+          ),
+          Some(Box::new(e)),
+        ));
       }
     };
     let mut stderr_file_path = history_path.clone();
@@ -178,19 +184,25 @@ impl MCPLocalServerProcess {
       .open(stderr_file_path.as_path())
     {
       Ok(f) => f,
-      Err(_) => {
-        return Err(NahError::io_error(&format!(
-          "Failed to create stderr file: {}",
-          stderr_file_path.display()
-        )));
+      Err(e) => {
+        return Err(NahError::io_error(
+          &format!(
+            "Failed to create stderr file: {}",
+            stderr_file_path.display()
+          ),
+          Some(Box::new(e)),
+        ));
       }
     };
     server_command.stderr(Stdio::from(stderr_file));
 
     let mut server_process = match server_command.spawn() {
       Ok(p) => p,
-      Err(_e) => {
-        return Err(NahError::mcp_server_process_launch_error(name));
+      Err(e) => {
+        return Err(NahError::mcp_server_process_launch_error(
+          name,
+          Some(Box::new(e)),
+        ));
       }
     };
 
@@ -241,10 +253,16 @@ impl MCPLocalServerProcess {
     data.push_str("\n");
     let _ = self.history_file.write(data.as_bytes());
     if self.stdin.write_all(&data.as_bytes()).is_err() {
-      return Err(NahError::mcp_server_communication_error(&self.server_name));
+      return Err(NahError::mcp_server_communication_error(
+        &self.server_name,
+        None,
+      ));
     }
     if self.stdin.flush().is_err() {
-      return Err(NahError::mcp_server_communication_error(&self.server_name));
+      return Err(NahError::mcp_server_communication_error(
+        &self.server_name,
+        None,
+      ));
     }
     Ok(())
   }
@@ -263,23 +281,30 @@ impl MCPLocalServerProcess {
     thread::spawn(move || {
       let mut buf = String::new();
       let mut stdout = stdout_thread.lock().unwrap();
-      if stdout.read_line(&mut buf).is_err() {
-        let _ = tx.send(Err(NahError::mcp_server_communication_error(
-          &server_name_copy,
-        )));
-        return;
+      match stdout.read_line(&mut buf) {
+        Ok(_) => {}
+        Err(e) => {
+          let _ = tx.send(Err(e));
+          return;
+        }
       }
       let _ = tx.send(Ok(buf));
     });
 
     match rx.recv_timeout(Duration::from_millis(self.timeout_ms)) {
-      Err(_) => {
-        return Err(NahError::mcp_server_timeout(&self.server_name));
+      Err(e) => {
+        return Err(NahError::mcp_server_timeout(
+          &self.server_name,
+          Some(Box::new(e)),
+        ));
       }
       Ok(result) => match result {
         Ok(bstr) => *buf = bstr,
         Err(e) => {
-          return Err(e);
+          return Err(NahError::mcp_server_communication_error(
+            &server_name_copy,
+            Some(Box::new(e)),
+          ));
         }
       },
     }
@@ -291,7 +316,10 @@ impl MCPLocalServerProcess {
     };
     match serde_json::from_str::<T>(response_json) {
       Ok(r) => Ok(r),
-      Err(_e) => Err(NahError::mcp_server_invalid_response(&self.server_name)),
+      Err(e) => Err(NahError::mcp_server_invalid_response(
+        &self.server_name,
+        Some(Box::new(e)),
+      )),
     }
   }
 
