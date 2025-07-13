@@ -261,9 +261,13 @@ impl ChatContext {
       };
       if !res.status().is_success() {
         let code = res.status().as_u16();
+        let error_content = res.text().await.unwrap();
         return Err(NahError::model_error(
           &self.model_config.model,
-          &format!("Model server responded with error: HTTP status {}", code),
+          &format!(
+            "Model server responded with error: HTTP status {}, error message = {}",
+            code, error_content
+          ),
           None,
         ));
       }
