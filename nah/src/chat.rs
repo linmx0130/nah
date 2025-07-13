@@ -4,6 +4,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 use core::time;
+use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::io::Write;
@@ -101,6 +102,7 @@ struct FunctionCallRequestChunkDelta {
 #[derive(Debug)]
 struct ChatContext {
   tools: Vec<Value>,
+  tool_name_to_server_map: HashMap<String, String>,
   model_config: ModelConfig,
   messages: Vec<ChatMessage>,
   tokio_runtime: Runtime,
@@ -109,7 +111,7 @@ struct ChatContext {
 const MESSAGE_FILE_PATH: &'static str = ".nah_user_message";
 
 pub fn process_chat(context: &mut AppContext) {
-  let tools = pull_tools(context).unwrap();
+  let (tools, tool_name_to_server_map) = pull_tools(context).unwrap();
   let model_config = context.model_config.clone().unwrap();
   let timestamp = std::time::SystemTime::now()
     .duration_since(SystemTime::UNIX_EPOCH)
@@ -124,6 +126,7 @@ pub fn process_chat(context: &mut AppContext) {
     .unwrap();
   let mut chat_context = ChatContext {
     tools,
+    tool_name_to_server_map,
     model_config,
     messages: Vec::new(),
     tokio_runtime: Builder::new_current_thread()
@@ -210,24 +213,27 @@ pub fn process_chat(context: &mut AppContext) {
 /**
  * Pull all available tools from the app context as the tools parameter accepted by OpenAI API.
  */
-fn pull_tools(context: &mut AppContext) -> Result<Vec<Value>, NahError> {
-  let mut result: Vec<Value> = Vec::new();
+fn pull_tools(context: &mut AppContext) -> Result<(Vec<Value>, HashMap<String, String>), NahError> {
+  let mut result = Vec::new();
+  let mut name_map = HashMap::new();
   for (server_name, server_process) in context.server_processes.iter_mut() {
     let tools = server_process.fetch_tools()?;
     for item in tools {
+      let new_name = format!("{}_{}", server_name, item.name);
       let function_tool_object = json!({
         "type": "function",
         "function": {
-          "name": format!("{}.{}", server_name, item.name),
+          "name": new_name.to_owned(),
           "description": item.description.to_owned(),
           "parameters": item.input_schema.clone(),
           "strict": false
         }
       });
       result.push(function_tool_object);
+      name_map.insert(new_name, server_name.to_string());
     }
   }
-  Ok(result)
+  Ok((result, name_map))
 }
 
 impl ChatContext {
@@ -473,9 +479,20 @@ impl ChatContext {
           "[Assistant - tool call request] {}({})",
           item.function.name, item.function.arguments
         );
-        let name_parts: Vec<&str> = item.function.name.split(".").collect();
-        let server_name = name_parts[0];
-        let tool_name = name_parts[1];
+        let server_name = match self.tool_name_to_server_map.get(&item.function.name) {
+          Some(n) => n,
+          None => {
+            return Err(NahError::model_invalid_response(
+              &self.model_config.model,
+              None,
+            ))
+          }
+        };
+        let tool_name = item
+          .function
+          .name
+          .strip_prefix(&format!("{}_", server_name))
+          .unwrap();
         let args: Value = match serde_json::from_str(&item.function.arguments) {
           Ok(args) => args,
           Err(e) => {
