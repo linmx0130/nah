@@ -136,6 +136,20 @@ pub fn process_chat(context: &mut AppContext) {
       .unwrap(),
     history_file,
   };
+  chat_context
+    .model_config
+    .system_prompt
+    .as_ref()
+    .and_then(|sys| {
+      chat_context.messages.push(ChatMessage {
+        role: "system".to_string(),
+        content: sys.to_string(),
+        reasoning_content: None,
+        tool_call_id: None,
+        tool_calls: None,
+      });
+      Some(())
+    });
   println!("Chat with model: {}", chat_context.model_config.model);
 
   let mut rl = rustyline::DefaultEditor::new().unwrap();

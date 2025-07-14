@@ -4,6 +4,7 @@
         "baseUrl": "https://api.siliconflow.cn/v1",
         "model": "Qwen/Qwen3-32b",
         "authToken": "<USE-YOUR-AUTH-TOKEN>",
+        "systemPrompt": "You are a helpful assistant. Be concise and accurate. If possible, try to ask for follow-up actions to continue the chat.",
         "extraParams": {
             "enable_thinking": true
         }
