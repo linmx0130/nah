@@ -29,6 +29,8 @@ pub struct ModelConfig {
   pub auth_token: String,
   #[serde(rename = "extraParams")]
   pub extra_params: Option<Value>,
+  #[serde(rename = "systemPrompt")]
+  pub system_prompt: Option<String>,
 }
 
 /**
