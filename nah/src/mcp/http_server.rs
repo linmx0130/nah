@@ -6,7 +6,7 @@
 use crate::{mcp::MCPServer, types::NahError};
 use nah_mcp_types::{
   notification::MCPNotification, request::MCPRequest, MCPPromptDefinition, MCPResourceDefinition,
-  MCPResponse, MCPToolDefinition,
+  MCPResponse, MCPToolDefinition, MCP_PROTOCOL_VERSION,
 };
 use reqwest::Client;
 use serde::Deserialize;
@@ -44,7 +44,7 @@ impl MCPServer for MCPHTTPServerConnection {
     }
     req = req.header("Content-Type", "application/json");
     req = req.header("Accept", "application/json,text/event-stream");
-    req = req.header("MCP-Protocol-Version", "2025-06-18");
+    req = req.header("MCP-Protocol-Version", MCP_PROTOCOL_VERSION);
     if self.session_id.is_some() {
       req = req.header("Mcp-Session-Id", self.session_id.as_ref().unwrap());
     }
@@ -141,7 +141,7 @@ impl MCPServer for MCPHTTPServerConnection {
         for (k, v) in self.headers.iter() {
           req = req.header(k, v);
         }
-        req = req.header("MCP-Protocol-Version", "2025-06-18");
+        req = req.header("MCP-Protocol-Version", MCP_PROTOCOL_VERSION);
         req = req.header("Mcp-Session-Id", session_id);
         match self.tokio_runtime.block_on(async { req.send().await }) {
           Ok(_) => Ok(()),
@@ -196,7 +196,7 @@ impl MCPHTTPServerConnection {
     }
     req = req.header("Content-Type", "application/json");
     req = req.header("Accept", "application/json,text/event-stream");
-    req = req.header("MCP-Protocol-Version", "2025-06-18");
+    req = req.header("MCP-Protocol-Version", MCP_PROTOCOL_VERSION);
     if self.session_id.is_some() {
       req = req.header("Mcp-Session-Id", self.session_id.as_ref().unwrap());
     }
