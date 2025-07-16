@@ -42,8 +42,12 @@ impl MCPServer for MCPHTTPServerConnection {
     for (k, v) in self.headers.iter() {
       req = req.header(k, v);
     }
-    req = req.header("Content-Type", "application/json");
-    req = req.header("Accept", "application/json,text/event-stream");
+    req = req.header(reqwest::header::CONTENT_TYPE, "application/json");
+    req = req.header(
+      reqwest::header::ACCEPT,
+      "application/json,text/event-stream",
+    );
+    req = req.header(reqwest::header::CONNECTION, "close");
     req = req.header("MCP-Protocol-Version", MCP_PROTOCOL_VERSION);
     if self.session_id.is_some() {
       req = req.header("Mcp-Session-Id", self.session_id.as_ref().unwrap());
@@ -194,8 +198,12 @@ impl MCPHTTPServerConnection {
     for (k, v) in self.headers.iter() {
       req = req.header(k, v);
     }
-    req = req.header("Content-Type", "application/json");
-    req = req.header("Accept", "application/json,text/event-stream");
+    req = req.header(reqwest::header::CONTENT_TYPE, "application/json");
+    req = req.header(
+      reqwest::header::ACCEPT,
+      "application/json,text/event-stream",
+    );
+    req = req.header(reqwest::header::CONNECTION, "close");
     req = req.header("MCP-Protocol-Version", MCP_PROTOCOL_VERSION);
     if self.session_id.is_some() {
       req = req.header("Mcp-Session-Id", self.session_id.as_ref().unwrap());

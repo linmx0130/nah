@@ -88,6 +88,7 @@ fn get_type_name(schema: &Value) -> Result<JSONSchemaTypeName, NahError> {
       "string" => Ok(JSONSchemaTypeName::String),
       "object" => Ok(JSONSchemaTypeName::Object),
       "number" => Ok(JSONSchemaTypeName::Number),
+      "integer" => Ok(JSONSchemaTypeName::Number),
       "boolean" => Ok(JSONSchemaTypeName::Boolean),
       "null" => Ok(JSONSchemaTypeName::Null),
       _ => Err(NahError::received_invalid_json_schema(
