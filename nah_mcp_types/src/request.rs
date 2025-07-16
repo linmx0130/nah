@@ -3,6 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
+use crate::MCP_PROTOCOL_VERSION;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 /**
@@ -23,7 +24,7 @@ impl MCPRequest {
    */
   pub fn initialize(id: &Value, client_name: &str, client_version: &str) -> Self {
     let params = Some(json!({
-        "protocolVersion": "2025-06-18",
+        "protocolVersion": MCP_PROTOCOL_VERSION,
         "capabilities": json!({}),
         "clientInfo": json!({
             "name": client_name,

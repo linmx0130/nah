@@ -8,6 +8,7 @@ pub mod request;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 /**
  * MCP Response is a JSON-RPC response.
  */
