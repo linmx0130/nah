@@ -30,6 +30,7 @@ pub use notification::MCPNotification;
 pub struct MCPLocalServerCommand {
   pub command: String,
   pub args: Vec<String>,
+  pub timeout_ms: Option<u64>,
 }
 /**
  * Wrapper of a MCP local server process.
@@ -151,6 +152,8 @@ impl MCPLocalServerProcess {
     mcp_command: &MCPLocalServerCommand,
     history_path: &PathBuf,
   ) -> Result<Self, NahError> {
+    // Default 5000ms timeout
+    let timeout_ms = mcp_command.timeout_ms.unwrap_or(5000);
     let mut server_command = Command::new(&mcp_command.command);
     for arg in mcp_command.args.iter() {
       server_command.arg(&arg);
@@ -217,7 +220,7 @@ impl MCPLocalServerProcess {
       tool_cache: HashMap::new(),
       resource_cache: HashMap::new(),
       prompt_cache: HashMap::new(),
-      timeout_ms: 5000,
+      timeout_ms,
       history_file,
     };
 
