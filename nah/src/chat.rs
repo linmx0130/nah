@@ -46,6 +46,73 @@ enum ChatResponseChunk {
   Done,
 }
 
+impl ChatMessage {
+  /**
+   * Consume the chunk delta return from the chat completion stream API and apply it on to the message.
+   */
+  fn apply_model_response_chunk(&mut self, chunk: ChatResponseChunkDelta) {
+    chunk.role.and_then(|role| {
+      self.role = role;
+      Some(())
+    });
+    chunk.content.and_then(|content| {
+      self.content.push_str(&content);
+      Some(())
+    });
+    chunk
+      .reasoning_content
+      .and_then(|reasoning_content: String| {
+        match &mut self.reasoning_content {
+          Some(r) => {
+            r.push_str(&reasoning_content);
+          }
+          None => self.reasoning_content = Some(reasoning_content),
+        }
+        Some(())
+      });
+    chunk.tool_calls.and_then(|tool_calls| {
+      if self.tool_calls.is_none() {
+        self.tool_calls = Some(Vec::new());
+      }
+      let message_tool_calls = self.tool_calls.as_mut().unwrap();
+      for tool_call in tool_calls {
+        let idx = tool_call.index;
+        while idx >= message_tool_calls.len() {
+          message_tool_calls.push(ToolCallRequest {
+            id: "".to_owned(),
+            _type: "".to_owned(),
+            function: FunctionCallRequest {
+              name: "".to_owned(),
+              arguments: "".to_owned(),
+            },
+          });
+        }
+        let object_to_apply = message_tool_calls.get_mut(idx).unwrap();
+        tool_call.id.and_then(|id| {
+          object_to_apply.id.push_str(&id);
+          Some(())
+        });
+        tool_call._type.and_then(|t| {
+          object_to_apply._type.push_str(&t);
+          Some(())
+        });
+        tool_call.function.and_then(|fcall| {
+          fcall.name.and_then(|name| {
+            object_to_apply.function.name.push_str(&name);
+            Some(())
+          });
+          fcall.arguments.and_then(|arg| {
+            object_to_apply.function.arguments.push_str(&arg);
+            Some(())
+          });
+          Some(())
+        });
+      }
+      Some(())
+    });
+  }
+}
+
 /**
  * Chunk delta of chat message from the assistant.
  */
@@ -316,7 +383,7 @@ impl ChatContext {
         let delta = self.get_model_response_chunk(chunk);
         match delta {
           Some(ChatResponseChunk::Delta(d)) => {
-            self.apply_model_response_chunk(&mut message, d);
+            message.apply_model_response_chunk(d);
             chunk_received += 1;
             print!(
               "\rModel is responding ... {} chunks received.",
@@ -416,71 +483,6 @@ impl ChatContext {
       Ok(v) => Some(ChatResponseChunk::Delta(v)),
       Err(_) => None,
     })
-  }
-
-  /**
-   * Consume the chunk delta return from the chat completion stream API and apply it on to the message.
-   */
-  fn apply_model_response_chunk(&self, message: &mut ChatMessage, chunk: ChatResponseChunkDelta) {
-    chunk.role.and_then(|role| {
-      message.role = role;
-      Some(())
-    });
-    chunk.content.and_then(|content| {
-      message.content.push_str(&content);
-      Some(())
-    });
-    chunk
-      .reasoning_content
-      .and_then(|reasoning_content: String| {
-        match &mut message.reasoning_content {
-          Some(r) => {
-            r.push_str(&reasoning_content);
-          }
-          None => message.reasoning_content = Some(reasoning_content),
-        }
-        Some(())
-      });
-    chunk.tool_calls.and_then(|tool_calls| {
-      if message.tool_calls.is_none() {
-        message.tool_calls = Some(Vec::new());
-      }
-      let message_tool_calls = message.tool_calls.as_mut().unwrap();
-      for tool_call in tool_calls {
-        let idx = tool_call.index;
-        while idx >= message_tool_calls.len() {
-          message_tool_calls.push(ToolCallRequest {
-            id: "".to_owned(),
-            _type: "".to_owned(),
-            function: FunctionCallRequest {
-              name: "".to_owned(),
-              arguments: "".to_owned(),
-            },
-          });
-        }
-        let object_to_apply = message_tool_calls.get_mut(idx).unwrap();
-        tool_call.id.and_then(|id| {
-          object_to_apply.id.push_str(&id);
-          Some(())
-        });
-        tool_call._type.and_then(|t| {
-          object_to_apply._type.push_str(&t);
-          Some(())
-        });
-        tool_call.function.and_then(|fcall| {
-          fcall.name.and_then(|name| {
-            object_to_apply.function.name.push_str(&name);
-            Some(())
-          });
-          fcall.arguments.and_then(|arg| {
-            object_to_apply.function.arguments.push_str(&arg);
-            Some(())
-          });
-          Some(())
-        });
-      }
-      Some(())
-    });
   }
 
   fn process_tool_calls(&mut self, app: &mut AppContext) -> Result<(), NahError> {
@@ -630,4 +632,83 @@ fn open_file_or_throw() -> Result<File, NahError> {
     }
   };
   Ok(file)
+}
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_apply_text_and_reasoning_content_chunk() {
+    let mut message = ChatMessage {
+      role: "assistant".to_owned(),
+      content: "A".to_owned(),
+      reasoning_content: None,
+      tool_call_id: None,
+      tool_calls: None,
+    };
+
+    message.apply_model_response_chunk(ChatResponseChunkDelta {
+      role: Some("assistant".to_owned()),
+      content: Some(" test".to_owned()),
+      reasoning_content: Some("reason".to_owned()),
+      tool_calls: None,
+    });
+
+    assert_eq!(message.role, "assistant");
+    assert_eq!(message.content, "A test");
+    assert_eq!(message.reasoning_content.unwrap(), "reason");
+  }
+
+  #[test]
+  fn test_apply_tool_calls() {
+    let mut message = ChatMessage {
+      role: "assistant".to_owned(),
+      content: "A".to_owned(),
+      reasoning_content: None,
+      tool_call_id: None,
+      tool_calls: None,
+    };
+
+    message.apply_model_response_chunk(ChatResponseChunkDelta {
+      role: None,
+      content: None,
+      reasoning_content: None,
+      tool_calls: Some(vec![ToolCallRequestChunkDelta {
+        index: 0,
+        id: Some("123".to_owned()),
+        _type: Some("function".to_owned()),
+        function: Some(FunctionCallRequestChunkDelta {
+          name: Some("x".to_owned()),
+          arguments: None,
+        }),
+      }]),
+    });
+    assert_eq!(message.role, "assistant");
+    {
+      let tool_calls = message.tool_calls.as_ref().unwrap();
+      assert_eq!(tool_calls[0].id, "123");
+      assert_eq!(tool_calls[0].function.name, "x");
+    }
+
+    message.apply_model_response_chunk(ChatResponseChunkDelta {
+      role: None,
+      content: None,
+      reasoning_content: None,
+      tool_calls: Some(vec![ToolCallRequestChunkDelta {
+        index: 0,
+        id: None,
+        _type: None,
+        function: Some(FunctionCallRequestChunkDelta {
+          name: Some("yz".to_owned()),
+          arguments: Some("{\"a".to_owned()),
+        }),
+      }]),
+    });
+    {
+      let tool_calls = message.tool_calls.as_ref().unwrap();
+      assert_eq!(tool_calls[0].id, "123");
+      assert_eq!(tool_calls[0].function.name, "xyz");
+      assert_eq!(tool_calls[0].function.arguments, "{\"a");
+    }
+  }
 }
