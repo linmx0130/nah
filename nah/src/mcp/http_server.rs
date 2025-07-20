@@ -18,6 +18,7 @@ use tokio::runtime::{Builder, Runtime};
 pub struct MCPRemoteServerConfig {
   pub url: String,
   pub headers: HashMap<String, String>,
+  pub timeout_ms: Option<u64>,
 }
 
 pub struct MCPHTTPServerConnection {
@@ -254,6 +255,9 @@ impl MCPHTTPServerConnection {
       prompt_cache: HashMap::new(),
       session_id: None,
     };
+    if config.timeout_ms.is_some() {
+      conn.set_timeout(config.timeout_ms.unwrap());
+    }
     let initialize_request = MCPRequest::initialize(
       &Value::String(uuid::Uuid::new_v4().to_string()),
       "nah",
