@@ -16,155 +16,11 @@ use crate::types::NahError;
 use crate::AppContext;
 use crate::ModelConfig;
 use bytes::Bytes;
+use nah_chat::{ChatClient, ChatMessage, ChatResponseChunk, ToolCallRequest};
 use reqwest::RequestBuilder;
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs::{File, OpenOptions};
 use tokio::runtime::{Builder, Runtime};
-
-/**
- * Data structure of a chat message, could be from the user, the assistant or the tool.
- */
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct ChatMessage {
-  pub role: String,
-  pub content: String,
-  #[serde(rename = "reasoningContent", skip_serializing_if = "Option::is_none")]
-  pub reasoning_content: Option<String>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub tool_call_id: Option<String>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub tool_calls: Option<Vec<ToolCallRequest>>,
-}
-
-/**
- * A chunk of chat message response from the assistant.
- */
-#[derive(Debug, Clone)]
-enum ChatResponseChunk {
-  Delta(ChatResponseChunkDelta),
-  Done,
-}
-
-impl ChatMessage {
-  /**
-   * Consume the chunk delta return from the chat completion stream API and apply it on to the message.
-   */
-  fn apply_model_response_chunk(&mut self, chunk: ChatResponseChunkDelta) {
-    chunk.role.and_then(|role| {
-      self.role = role;
-      Some(())
-    });
-    chunk.content.and_then(|content| {
-      self.content.push_str(&content);
-      Some(())
-    });
-    chunk
-      .reasoning_content
-      .and_then(|reasoning_content: String| {
-        match &mut self.reasoning_content {
-          Some(r) => {
-            r.push_str(&reasoning_content);
-          }
-          None => self.reasoning_content = Some(reasoning_content),
-        }
-        Some(())
-      });
-    chunk.tool_calls.and_then(|tool_calls| {
-      if self.tool_calls.is_none() {
-        self.tool_calls = Some(Vec::new());
-      }
-      let message_tool_calls = self.tool_calls.as_mut().unwrap();
-      for tool_call in tool_calls {
-        let idx = tool_call.index;
-        while idx >= message_tool_calls.len() {
-          message_tool_calls.push(ToolCallRequest {
-            id: "".to_owned(),
-            _type: "".to_owned(),
-            function: FunctionCallRequest {
-              name: "".to_owned(),
-              arguments: "".to_owned(),
-            },
-          });
-        }
-        let object_to_apply = message_tool_calls.get_mut(idx).unwrap();
-        tool_call.id.and_then(|id| {
-          object_to_apply.id.push_str(&id);
-          Some(())
-        });
-        tool_call._type.and_then(|t| {
-          object_to_apply._type.push_str(&t);
-          Some(())
-        });
-        tool_call.function.and_then(|fcall| {
-          fcall.name.and_then(|name| {
-            object_to_apply.function.name.push_str(&name);
-            Some(())
-          });
-          fcall.arguments.and_then(|arg| {
-            object_to_apply.function.arguments.push_str(&arg);
-            Some(())
-          });
-          Some(())
-        });
-      }
-      Some(())
-    });
-  }
-}
-
-/**
- * Chunk delta of chat message from the assistant.
- */
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct ChatResponseChunkDelta {
-  pub role: Option<String>,
-  pub content: Option<String>,
-  #[serde(rename = "reasoning_content")]
-  pub reasoning_content: Option<String>,
-  pub tool_calls: Option<Vec<ToolCallRequestChunkDelta>>,
-}
-
-/**
- * A tool call request. Only function call is supported now.
- */
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct ToolCallRequest {
-  pub id: String,
-  #[serde(rename = "type")]
-  pub _type: String,
-  pub function: FunctionCallRequest,
-}
-
-/**
- * A tool call request chunk received from stream api.
- */
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct ToolCallRequestChunkDelta {
-  pub index: usize,
-  pub id: Option<String>,
-  #[serde(rename = "type")]
-  pub _type: Option<String>,
-  pub function: Option<FunctionCallRequestChunkDelta>,
-}
-
-/**
- * A function call request.
- */
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct FunctionCallRequest {
-  pub name: String,
-  pub arguments: String,
-}
-
-/**
- * A function call request chunk received from stream api.
- */
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct FunctionCallRequestChunkDelta {
-  pub name: Option<String>,
-  pub arguments: Option<String>,
-}
 
 #[derive(Debug)]
 struct ChatContext {
@@ -173,6 +29,7 @@ struct ChatContext {
   model_config: ModelConfig,
   messages: Vec<ChatMessage>,
   tokio_runtime: Runtime,
+  chat_client: ChatClient,
   history_file: File,
 }
 const MESSAGE_FILE_PATH: &'static str = ".nah_user_message";
@@ -191,6 +48,10 @@ pub fn process_chat(context: &mut AppContext) {
     .append(true)
     .open(history_file_path)
     .unwrap();
+  let chat_client = ChatClient::init(
+    model_config.base_url.to_owned(),
+    model_config.auth_token.to_owned(),
+  );
   let mut chat_context = ChatContext {
     tools,
     tool_name_to_server_map,
@@ -201,6 +62,7 @@ pub fn process_chat(context: &mut AppContext) {
       .enable_time()
       .build()
       .unwrap(),
+    chat_client,
     history_file,
   };
   chat_context
@@ -335,7 +197,7 @@ impl ChatContext {
    * Generate assistant message.
    */
   pub fn generate(&mut self) -> Result<&ChatMessage, NahError> {
-    let req_stream = self.get_generate_request(true);
+    let req_stream = self.get_generate_request();
     let message: Result<ChatMessage, NahError> = self.tokio_runtime.block_on(async {
       let mut res = match req_stream.send().await {
         Ok(r) => r,
@@ -358,13 +220,7 @@ impl ChatContext {
           None,
         ));
       }
-      let mut message = ChatMessage {
-        role: "".to_owned(),
-        content: "".to_owned(),
-        reasoning_content: None,
-        tool_call_id: None,
-        tool_calls: None,
-      };
+      let mut message = ChatMessage::new();
       let mut reach_done = false;
       let mut chunk_received = 0usize;
       print!("Model is responding ...");
@@ -413,18 +269,15 @@ impl ChatContext {
     }
   }
 
-  fn get_generate_request(&self, is_stream: bool) -> RequestBuilder {
-    let mut data = json!({
-        "model": self.model_config.model,
-        "messages": self.messages.clone(),
-        "stream": is_stream,
-        "max_tokens": 4096,
-        "tools": self.tools.clone(),
-        "n": 1,
-        "temperature": 0.7,
-        "top_p": 0.9,
-        "frequency_penalty": 0.5
-    });
+  fn get_generate_request(&self) -> RequestBuilder {
+    let mut params = HashMap::from([
+      ("max_token".to_owned(), json!(4096)),
+      ("tools".to_owned(), json!(self.tools.clone())),
+      ("n".to_owned(), json!(1)),
+      ("temperature".to_owned(), json!(0.7)),
+      ("top_p".to_owned(), json!(0.9)),
+      ("frequency_penalty".to_owned(), json!(0.5)),
+    ]);
 
     self
       .model_config
@@ -433,21 +286,17 @@ impl ChatContext {
       .and_then(|v| v.as_object())
       .and_then(|extra_params| {
         extra_params.iter().for_each(|(key, value)| {
-          data
-            .as_object_mut()
-            .and_then(|o| o.insert(key.to_owned(), value.to_owned()));
+          params.insert(key.to_owned(), value.to_owned());
         });
         Some(())
       });
 
-    let client = reqwest::Client::new();
-    let endpoint = format!("{}/chat/completions", self.model_config.base_url);
-    let req = client
-      .post(&endpoint)
-      .bearer_auth(self.model_config.auth_token.clone())
-      .header("Content-Type", "application/json")
-      .body(serde_json::to_string(&data).unwrap());
-    req
+    self.chat_client.create_chat_completion_request(
+      &self.model_config.model,
+      &self.messages,
+      true,
+      &params,
+    )
   }
 
   /**
@@ -632,83 +481,4 @@ fn open_file_or_throw() -> Result<File, NahError> {
     }
   };
   Ok(file)
-}
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn test_apply_text_and_reasoning_content_chunk() {
-    let mut message = ChatMessage {
-      role: "assistant".to_owned(),
-      content: "A".to_owned(),
-      reasoning_content: None,
-      tool_call_id: None,
-      tool_calls: None,
-    };
-
-    message.apply_model_response_chunk(ChatResponseChunkDelta {
-      role: Some("assistant".to_owned()),
-      content: Some(" test".to_owned()),
-      reasoning_content: Some("reason".to_owned()),
-      tool_calls: None,
-    });
-
-    assert_eq!(message.role, "assistant");
-    assert_eq!(message.content, "A test");
-    assert_eq!(message.reasoning_content.unwrap(), "reason");
-  }
-
-  #[test]
-  fn test_apply_tool_calls() {
-    let mut message = ChatMessage {
-      role: "assistant".to_owned(),
-      content: "A".to_owned(),
-      reasoning_content: None,
-      tool_call_id: None,
-      tool_calls: None,
-    };
-
-    message.apply_model_response_chunk(ChatResponseChunkDelta {
-      role: None,
-      content: None,
-      reasoning_content: None,
-      tool_calls: Some(vec![ToolCallRequestChunkDelta {
-        index: 0,
-        id: Some("123".to_owned()),
-        _type: Some("function".to_owned()),
-        function: Some(FunctionCallRequestChunkDelta {
-          name: Some("x".to_owned()),
-          arguments: None,
-        }),
-      }]),
-    });
-    assert_eq!(message.role, "assistant");
-    {
-      let tool_calls = message.tool_calls.as_ref().unwrap();
-      assert_eq!(tool_calls[0].id, "123");
-      assert_eq!(tool_calls[0].function.name, "x");
-    }
-
-    message.apply_model_response_chunk(ChatResponseChunkDelta {
-      role: None,
-      content: None,
-      reasoning_content: None,
-      tool_calls: Some(vec![ToolCallRequestChunkDelta {
-        index: 0,
-        id: None,
-        _type: None,
-        function: Some(FunctionCallRequestChunkDelta {
-          name: Some("yz".to_owned()),
-          arguments: Some("{\"a".to_owned()),
-        }),
-      }]),
-    });
-    {
-      let tool_calls = message.tool_calls.as_ref().unwrap();
-      assert_eq!(tool_calls[0].id, "123");
-      assert_eq!(tool_calls[0].function.name, "xyz");
-      assert_eq!(tool_calls[0].function.arguments, "{\"a");
-    }
-  }
 }
