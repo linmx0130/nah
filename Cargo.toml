@@ -1,4 +1,4 @@
 [workspace]
 resolver = "3"
-members = ["nah", "nah_mcp_types", "nah_server"]
+members = ["nah", "nah_chat", "nah_mcp_types", "nah_server"]
 exclude = ["example_server"]
