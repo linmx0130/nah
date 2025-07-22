@@ -15,3 +15,4 @@ uuid = { version = "1.16.0", features = ["v4"] }
 nah_mcp_types = { path="../nah_mcp_types" }
 nah_chat = { path = "../nah_chat"}
 bytes = { version = "1.10" }
+futures-util = "0.3.31"

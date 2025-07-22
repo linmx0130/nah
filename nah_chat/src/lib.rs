@@ -4,18 +4,54 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
+use async_stream::stream;
+use bytes::Bytes;
+use futures_core::stream::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
+#[derive(Debug)]
 pub enum ErrorKind {
   NetworkError,
   ModelServerError,
 }
 
+impl std::fmt::Display for ErrorKind {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      ErrorKind::NetworkError => {
+        write!(f, "Network error")
+      }
+      ErrorKind::ModelServerError => {
+        write!(f, "Model server error")
+      }
+    }
+  }
+}
+
+#[derive(Debug)]
 pub struct Error {
   kind: ErrorKind,
+  message: Option<String>,
   cause: Option<Box<dyn std::error::Error>>,
+}
+
+impl std::error::Error for Error {
+  fn cause(&self) -> Option<&dyn std::error::Error> {
+    self.cause.as_ref().and_then(|e| Some(e.as_ref()))
+  }
+}
+
+impl std::fmt::Display for Error {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(
+      f,
+      "{}: {}",
+      self.kind,
+      self.message.clone().unwrap_or("None".to_string()),
+    )
+  }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -226,6 +262,105 @@ impl ChatClient {
       .bearer_auth(self.auth_token.clone())
       .header(reqwest::header::CONTENT_TYPE, "application/json")
       .body(serde_json::to_string(&data).unwrap())
+  }
+
+  /**
+   * Request chat completion in the async stream approach.
+   */
+  pub async fn chat_completion_stream(
+    &self,
+    model: &str,
+    messages: &Vec<ChatMessage>,
+    params: &HashMap<String, Value>,
+  ) -> Result<impl Stream<Item = Result<ChatResponseChunkDelta>>> {
+    let req = self.create_chat_completion_request(model, messages, true, params);
+    let mut res = match req.send().await {
+      Ok(r) => r,
+      Err(e) => {
+        return Err(Error {
+          kind: ErrorKind::NetworkError,
+          cause: Some(Box::new(e)),
+          message: None,
+        });
+      }
+    };
+
+    if !res.status().is_success() {
+      let code = res.status().as_u16();
+      let error_content = res.text().await.unwrap();
+      return Err(Error {
+        kind: ErrorKind::ModelServerError,
+        message: Some(format!(
+          "Model server responded with error: HTTP status {}, error message = {}",
+          code, error_content
+        )),
+        cause: None,
+      });
+    }
+
+    let stream = stream! {
+      let mut reach_done = false;
+      while !reach_done {
+        let chunk = match res.chunk().await {
+          Ok(Some(chunk)) => chunk,
+          Ok(None) => continue,
+          Err(e) => {
+            yield Err(Error{
+                kind: ErrorKind::NetworkError,
+                message: None,
+                cause: Some(Box::new(e))
+            });
+            break;
+          }
+        };
+        let delta = self.get_model_response_chunk(chunk);
+        match delta {
+          Some(ChatResponseChunk::Delta(d)) => {
+            yield Ok(d);
+          }
+          Some(ChatResponseChunk::Done) => {
+            reach_done = true;
+          }
+          None => {}
+        }
+      }
+    };
+    Ok(stream)
+  }
+
+  /**
+   * Parse the stream data from the stream chat completion API to obtain a chunk delta.
+   */
+  fn get_model_response_chunk(&self, chunk: Bytes) -> Option<ChatResponseChunk> {
+    let data_str = match String::from_utf8(chunk.to_vec()) {
+      Ok(v) => v,
+      Err(_) => {
+        return None;
+      }
+    };
+    if !data_str.starts_with("data: ") {
+      return None;
+    }
+    if data_str.starts_with("data: [DONE]") {
+      return Some(ChatResponseChunk::Done);
+    }
+    let trim_data = data_str.strip_prefix("data: ").unwrap().trim();
+    let chunk_value: Value = match serde_json::from_str(trim_data) {
+      Ok(v) => v,
+      Err(_) => return None,
+    };
+    let delta_value = chunk_value
+      .as_object()
+      .and_then(|chunk| chunk.get("choices"))
+      .and_then(|choices_value| choices_value.as_array())
+      .and_then(|choices_arr| choices_arr.get(0))
+      .and_then(|choice_value| choice_value.as_object())
+      .and_then(|choice_obj| choice_obj.get("delta"));
+
+    delta_value.and_then(|v| match serde_json::from_value(v.to_owned()) {
+      Ok(v) => Some(ChatResponseChunk::Delta(v)),
+      Err(_) => None,
+    })
   }
 }
 

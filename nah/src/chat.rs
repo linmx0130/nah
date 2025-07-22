@@ -15,9 +15,9 @@ use crate::editor::launch_editor;
 use crate::types::NahError;
 use crate::AppContext;
 use crate::ModelConfig;
-use bytes::Bytes;
-use nah_chat::{ChatClient, ChatMessage, ChatResponseChunk, ToolCallRequest};
-use reqwest::RequestBuilder;
+use futures_util::pin_mut;
+use futures_util::stream::StreamExt;
+use nah_chat::{ChatClient, ChatMessage, ToolCallRequest};
 use serde_json::{json, Value};
 use std::fs::{File, OpenOptions};
 use tokio::runtime::{Builder, Runtime};
@@ -197,79 +197,6 @@ impl ChatContext {
    * Generate assistant message.
    */
   pub fn generate(&mut self) -> Result<&ChatMessage, NahError> {
-    let req_stream = self.get_generate_request();
-    let message: Result<ChatMessage, NahError> = self.tokio_runtime.block_on(async {
-      let mut res = match req_stream.send().await {
-        Ok(r) => r,
-        Err(e) => {
-          return Err(NahError::model_invalid_response(
-            &self.model_config.model,
-            Some(Box::new(e)),
-          ))
-        }
-      };
-      if !res.status().is_success() {
-        let code = res.status().as_u16();
-        let error_content = res.text().await.unwrap();
-        return Err(NahError::model_error(
-          &self.model_config.model,
-          &format!(
-            "Model server responded with error: HTTP status {}, error message = {}",
-            code, error_content
-          ),
-          None,
-        ));
-      }
-      let mut message = ChatMessage::new();
-      let mut reach_done = false;
-      let mut chunk_received = 0usize;
-      print!("Model is responding ...");
-      let _ = std::io::stdout().flush();
-      while !reach_done {
-        let chunk = match res.chunk().await {
-          Ok(Some(chunk)) => chunk,
-          Ok(None) => continue,
-          Err(e) => {
-            return Err(NahError::model_invalid_response(
-              &self.model_config.model,
-              Some(Box::new(e)),
-            ))
-          }
-        };
-        let delta = self.get_model_response_chunk(chunk);
-        match delta {
-          Some(ChatResponseChunk::Delta(d)) => {
-            message.apply_model_response_chunk(d);
-            chunk_received += 1;
-            print!(
-              "\rModel is responding ... {} chunks received.",
-              chunk_received
-            );
-            let _ = std::io::stdout().flush();
-          }
-          Some(ChatResponseChunk::Done) => {
-            reach_done = true;
-            println!("\nModel finished generation!");
-          }
-          None => {}
-        }
-      }
-      Ok(message)
-    });
-
-    match message {
-      Ok(msg) => {
-        self.push_message(msg);
-        Ok(&self.messages[self.messages.len() - 1])
-      }
-      Err(e) => Err(NahError::model_invalid_response(
-        &self.model_config.model,
-        Some(Box::new(e)),
-      )),
-    }
-  }
-
-  fn get_generate_request(&self) -> RequestBuilder {
     let mut params = HashMap::from([
       ("max_token".to_owned(), json!(4096)),
       ("tools".to_owned(), json!(self.tools.clone())),
@@ -291,47 +218,62 @@ impl ChatContext {
         Some(())
       });
 
-    self.chat_client.create_chat_completion_request(
-      &self.model_config.model,
-      &self.messages,
-      true,
-      &params,
-    )
-  }
+    let message: Result<ChatMessage, NahError> = self.tokio_runtime.block_on(async {
+      let stream = match self
+        .chat_client
+        .chat_completion_stream(&self.model_config.model, &self.messages, &params)
+        .await
+      {
+        Ok(s) => s,
+        Err(e) => {
+          return Err(NahError::model_error(
+            &self.model_config.model,
+            "Error in requesting responses from the model",
+            Some(Box::new(e)),
+          ));
+        }
+      };
 
-  /**
-   * Parse the stream data from the stream chat completion API to obtain a chunk delta.
-   */
-  fn get_model_response_chunk(&self, chunk: Bytes) -> Option<ChatResponseChunk> {
-    let data_str = match String::from_utf8(chunk.to_vec()) {
-      Ok(v) => v,
-      Err(_) => {
-        return None;
+      pin_mut!(stream);
+      let mut message = ChatMessage::new();
+      print!("Model is responding ...");
+      let _ = std::io::stdout().flush();
+      let mut chunk_received = 0;
+
+      while let Some(delta_result) = stream.next().await {
+        match delta_result {
+          Ok(delta) => {
+            message.apply_model_response_chunk(delta);
+            chunk_received += 1;
+            print!(
+              "\rModel is responding ... {} chunks received.",
+              chunk_received
+            );
+            let _ = std::io::stdout().flush();
+          }
+          Err(e) => {
+            return Err(NahError::model_error(
+              &self.model_config.model,
+              "Error in receiving responses from the model",
+              Some(Box::new(e)),
+            ));
+          }
+        }
       }
-    };
-    if !data_str.starts_with("data: ") {
-      return None;
-    }
-    if data_str.starts_with("data: [DONE]") {
-      return Some(ChatResponseChunk::Done);
-    }
-    let trim_data = data_str.strip_prefix("data: ").unwrap().trim();
-    let chunk_value: Value = match serde_json::from_str(trim_data) {
-      Ok(v) => v,
-      Err(_) => return None,
-    };
-    let delta_value = chunk_value
-      .as_object()
-      .and_then(|chunk| chunk.get("choices"))
-      .and_then(|choices_value| choices_value.as_array())
-      .and_then(|choices_arr| choices_arr.get(0))
-      .and_then(|choice_value| choice_value.as_object())
-      .and_then(|choice_obj| choice_obj.get("delta"));
+      println!("\nModel finished generation!");
+      Ok(message)
+    });
 
-    delta_value.and_then(|v| match serde_json::from_value(v.to_owned()) {
-      Ok(v) => Some(ChatResponseChunk::Delta(v)),
-      Err(_) => None,
-    })
+    match message {
+      Ok(msg) => {
+        self.push_message(msg);
+        Ok(&self.messages[self.messages.len() - 1])
+      }
+      Err(e) => Err(NahError::model_invalid_response(
+        &self.model_config.model,
+        Some(Box::new(e)),
+      )),
+    }
   }
 
   fn process_tool_calls(&mut self, app: &mut AppContext) -> Result<(), NahError> {
