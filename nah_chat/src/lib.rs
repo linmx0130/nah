@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
+/**
+ * Error kinds that may occur in `nah_chat`.
+ */
 #[derive(Debug)]
 pub enum ErrorKind {
   NetworkError,
@@ -30,6 +33,9 @@ impl std::fmt::Display for ErrorKind {
   }
 }
 
+/**
+ * Error type of `nah_chat`.
+ */
 #[derive(Debug)]
 pub struct Error {
   kind: ErrorKind,
@@ -58,6 +64,15 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /**
  * Data structure of a chat message, could be from the user, the assistant or the tool.
+ *
+ * Fields:
+ * * `role`: The role of the message.
+ * * `content`: Text string content of the message.
+ * * `reasoning_content`: Reasoning content in string.
+ * * `tool_call_id`: Only valid for messages with `role` of `"tool"`. It indicates which tool call this
+ *                    message is responding to.
+ * * `tool_calls`: Only valid for messages with `role` of `"assistant"`. It is the tool calls
+ *                 requested by the model.
  */
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatMessage {
@@ -365,81 +380,4 @@ impl ChatClient {
 }
 
 #[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn test_apply_text_and_reasoning_content_chunk() {
-    let mut message = ChatMessage {
-      role: "assistant".to_owned(),
-      content: "A".to_owned(),
-      reasoning_content: None,
-      tool_call_id: None,
-      tool_calls: None,
-    };
-
-    message.apply_model_response_chunk(ChatResponseChunkDelta {
-      role: Some("assistant".to_owned()),
-      content: Some(" test".to_owned()),
-      reasoning_content: Some("reason".to_owned()),
-      tool_calls: None,
-    });
-
-    assert_eq!(message.role, "assistant");
-    assert_eq!(message.content, "A test");
-    assert_eq!(message.reasoning_content.unwrap(), "reason");
-  }
-
-  #[test]
-  fn test_apply_tool_calls() {
-    let mut message = ChatMessage {
-      role: "assistant".to_owned(),
-      content: "A".to_owned(),
-      reasoning_content: None,
-      tool_call_id: None,
-      tool_calls: None,
-    };
-
-    message.apply_model_response_chunk(ChatResponseChunkDelta {
-      role: None,
-      content: None,
-      reasoning_content: None,
-      tool_calls: Some(vec![ToolCallRequestChunkDelta {
-        index: 0,
-        id: Some("123".to_owned()),
-        _type: Some("function".to_owned()),
-        function: Some(FunctionCallRequestChunkDelta {
-          name: Some("x".to_owned()),
-          arguments: None,
-        }),
-      }]),
-    });
-    assert_eq!(message.role, "assistant");
-    {
-      let tool_calls = message.tool_calls.as_ref().unwrap();
-      assert_eq!(tool_calls[0].id, "123");
-      assert_eq!(tool_calls[0].function.name, "x");
-    }
-
-    message.apply_model_response_chunk(ChatResponseChunkDelta {
-      role: None,
-      content: None,
-      reasoning_content: None,
-      tool_calls: Some(vec![ToolCallRequestChunkDelta {
-        index: 0,
-        id: None,
-        _type: None,
-        function: Some(FunctionCallRequestChunkDelta {
-          name: Some("yz".to_owned()),
-          arguments: Some("{\"a".to_owned()),
-        }),
-      }]),
-    });
-    {
-      let tool_calls = message.tool_calls.as_ref().unwrap();
-      assert_eq!(tool_calls[0].id, "123");
-      assert_eq!(tool_calls[0].function.name, "xyz");
-      assert_eq!(tool_calls[0].function.arguments, "{\"a");
-    }
-  }
-}
+mod tests;
