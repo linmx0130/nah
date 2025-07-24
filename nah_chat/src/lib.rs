@@ -185,10 +185,13 @@ impl ChatMessage {
         Some(())
       });
     chunk.tool_calls.and_then(|tool_calls| {
-      if self.tool_calls.is_none() {
-        self.tool_calls = Some(Vec::new());
-      }
-      let message_tool_calls = self.tool_calls.as_mut().unwrap();
+      let message_tool_calls = match self.tool_calls.as_mut() {
+        Some(t) => t,
+        None => {
+          self.tool_calls = Some(Vec::new());
+          self.tool_calls.as_mut().unwrap()
+        }
+      };
       for tool_call in tool_calls {
         let idx = tool_call.index;
         while idx >= message_tool_calls.len() {
