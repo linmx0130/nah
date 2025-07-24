@@ -53,7 +53,7 @@
 //! # }
 //! ```
 //! # Notice
-//! Copyright 2025, Mengxiao Lin <linmx0130@gmail.com>.
+//! Copyright 2025, [Mengxiao Lin](linmx0130@gmail.com).
 //! This is a part of [nah](https://github.com/linmx0130/nah) project. `nah` means "*N*ot *A*
 //! *H*uman". Source code is available under [MPL-2.0](https://mozilla.org/MPL/2.0/).
 //!
