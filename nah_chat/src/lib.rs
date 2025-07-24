@@ -6,7 +6,7 @@
 
 //!
 //! # Introduction
-//! This crate exposeses an async stream API for the widely-used OpenAI
+//! This crate exposes an async stream API for the widely-used OpenAI
 //! [chat completion API](https://platform.openai.com/docs/api-reference/chat).
 //!
 //! Supported features:
@@ -45,7 +45,9 @@
 //!     Ok(delta) => {
 //!       message.apply_model_response_chunk(delta);
 //!     }
-//!     Err(e) => {}
+//!     Err(e) => {
+//!       eprintln!("Error occurred while processing the chat completion: {}", e);
+//!     }
 //!   }
 //! }
 //! # }
@@ -343,7 +345,7 @@ impl ChatClient {
       .header(reqwest::header::CONTENT_TYPE, "application/json")
       .body(serde_json::to_string(&data).unwrap());
     if self.auth_token.is_some() {
-      req = req.bearer_auth(self.auth_token.as_ref().unwrap().clone())
+      req = req.bearer_auth(self.auth_token.as_ref().unwrap().as_str());
     }
 
     req
