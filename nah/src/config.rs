@@ -26,7 +26,7 @@ pub struct ModelConfig {
   pub base_url: String,
   pub model: String,
   #[serde(rename = "authToken")]
-  pub auth_token: String,
+  pub auth_token: Option<String>,
   #[serde(rename = "extraParams")]
   pub extra_params: Option<Value>,
   #[serde(rename = "systemPrompt")]
