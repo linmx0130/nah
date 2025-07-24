@@ -4,6 +4,59 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
+//!
+//! # Introduction
+//! This crate exposes an async stream API for the widely-used OpenAI
+//! [chat completion API](https://platform.openai.com/docs/api-reference/chat).
+//!
+//! Supported features:
+//! * Stream generation
+//! * Tool calls
+//! * Reasoning content (Qwen3, Deepseek R1, etc)
+//!
+//! This crate is built on top of `tokio`, `reqwest` and `serde_json`.
+//!
+//! ```rust
+//! use nah_chat::{ChatClient, ChatMessage};
+//! use futures_util::{pin_mut, StreamExt};
+//!
+//! # async fn make_request_example() {
+//! # let base_url = "http://localhost:8080".to_string();
+//! # let auth_token = None;
+//! # let model_name = "deepseek-r1";
+//! # let messages = vec![];
+//! # let params = std::collections::HashMap::new();
+//!
+//! let chat_client = ChatClient::init(base_url, auth_token);
+//!
+//! // create and pin the stream
+//! let stream = chat_client
+//!        .chat_completion_stream(model_name, &messages, &params)
+//!        .await
+//!        .unwrap();
+//! pin_mut!(stream);
+//!
+//! // buffer for the new message
+//! let mut message = ChatMessage::new();
+//!
+//! // consume the stream
+//! while let Some(delta_result) = stream.next().await {
+//!   match delta_result {
+//!     Ok(delta) => {
+//!       message.apply_model_response_chunk(delta);
+//!     }
+//!     Err(e) => {
+//!       eprintln!("Error occurred while processing the chat completion: {}", e);
+//!     }
+//!   }
+//! }
+//! # }
+//! ```
+//! # Notice
+//! Copyright 2025, [Mengxiao Lin](linmx0130@gmail.com).
+//! This is a part of [nah](https://github.com/linmx0130/nah) project. `nah` means "*N*ot *A*
+//! *H*uman". Source code is available under [MPL-2.0](https://mozilla.org/MPL/2.0/).
+//!
 use async_stream::stream;
 use bytes::Bytes;
 use futures_core::stream::Stream;
@@ -11,6 +64,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
+/**
+ * Error kinds that may occur in `nah_chat`.
+ */
 #[derive(Debug)]
 pub enum ErrorKind {
   NetworkError,
@@ -30,6 +86,9 @@ impl std::fmt::Display for ErrorKind {
   }
 }
 
+/**
+ * Error type of `nah_chat`.
+ */
 #[derive(Debug)]
 pub struct Error {
   kind: ErrorKind,
@@ -58,6 +117,15 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /**
  * Data structure of a chat message, could be from the user, the assistant or the tool.
+ *
+ * Fields:
+ * * `role`: The role of the message.
+ * * `content`: Text string content of the message.
+ * * `reasoning_content`: Reasoning content in string.
+ * * `tool_call_id`: Only valid for messages with `role` of `"tool"`. It indicates which tool call this
+ *                    message is responding to.
+ * * `tool_calls`: Only valid for messages with `role` of `"assistant"`. It is the tool calls
+ *                 requested by the model.
  */
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatMessage {
@@ -117,10 +185,13 @@ impl ChatMessage {
         Some(())
       });
     chunk.tool_calls.and_then(|tool_calls| {
-      if self.tool_calls.is_none() {
-        self.tool_calls = Some(Vec::new());
-      }
-      let message_tool_calls = self.tool_calls.as_mut().unwrap();
+      let message_tool_calls = match self.tool_calls.as_mut() {
+        Some(t) => t,
+        None => {
+          self.tool_calls = Some(Vec::new());
+          self.tool_calls.as_mut().unwrap()
+        }
+      };
       for tool_call in tool_calls {
         let idx = tool_call.index;
         while idx >= message_tool_calls.len() {
@@ -212,10 +283,13 @@ pub struct FunctionCallRequestChunkDelta {
   pub arguments: Option<String>,
 }
 
+/**
+ * The object to hold information about the model server and `reqwest` HTTP client.
+ */
 #[derive(Debug)]
 pub struct ChatClient {
   pub base_url: String,
-  pub auth_token: String,
+  pub auth_token: Option<String>,
   pub http_client: reqwest::Client,
 }
 
@@ -223,8 +297,12 @@ impl ChatClient {
   /**
    * Create a new ChatClient instance, which hosts the basic information and reqwest client
    * for making the requests
+   *
+   * Args:
+   * * `base_url` Base url of the API server. This URL should NOT end with '/'.
+   * * `auth_token` Bearer authentication token. It is often called "API Key".
    */
-  pub fn init(base_url: String, auth_token: String) -> Self {
+  pub fn init(base_url: String, auth_token: Option<String>) -> Self {
     let client = reqwest::Client::new();
     ChatClient {
       base_url: base_url,
@@ -235,6 +313,12 @@ impl ChatClient {
 
   /**
    * Create a chat completion request.
+   *
+   * Args:
+   * * `model` Name of the model to be called.
+   * * `messages` A [Vec] of [ChatMessage] as the context.
+   * * `is_stream` Whether the request is stream-based.
+   * * `params` Other parameters to be sent.
    */
   pub fn create_chat_completion_request(
     &self,
@@ -246,7 +330,8 @@ impl ChatClient {
     let mut data = json!({
         "model": model.to_owned(),
         "messages": messages.clone(),
-        "stream": is_stream
+        "stream": is_stream,
+        "n": 1,
     });
 
     params.iter().for_each(|(key, value)| {
@@ -256,16 +341,26 @@ impl ChatClient {
     });
 
     let endpoint = format!("{}/chat/completions", self.base_url);
-    self
+
+    let mut req = self
       .http_client
       .post(&endpoint)
-      .bearer_auth(self.auth_token.clone())
       .header(reqwest::header::CONTENT_TYPE, "application/json")
-      .body(serde_json::to_string(&data).unwrap())
+      .body(serde_json::to_string(&data).unwrap());
+    if self.auth_token.is_some() {
+      req = req.bearer_auth(self.auth_token.as_ref().unwrap().as_str());
+    }
+
+    req
   }
 
   /**
    * Request chat completion in the async stream approach.
+   *
+   * Args:
+   * * `model` Name of the model to be called.
+   * * `messages` A [Vec] of [ChatMessage] as the context.
+   * * `params` Other parameters to be sent.
    */
   pub async fn chat_completion_stream(
     &self,
@@ -365,81 +460,4 @@ impl ChatClient {
 }
 
 #[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn test_apply_text_and_reasoning_content_chunk() {
-    let mut message = ChatMessage {
-      role: "assistant".to_owned(),
-      content: "A".to_owned(),
-      reasoning_content: None,
-      tool_call_id: None,
-      tool_calls: None,
-    };
-
-    message.apply_model_response_chunk(ChatResponseChunkDelta {
-      role: Some("assistant".to_owned()),
-      content: Some(" test".to_owned()),
-      reasoning_content: Some("reason".to_owned()),
-      tool_calls: None,
-    });
-
-    assert_eq!(message.role, "assistant");
-    assert_eq!(message.content, "A test");
-    assert_eq!(message.reasoning_content.unwrap(), "reason");
-  }
-
-  #[test]
-  fn test_apply_tool_calls() {
-    let mut message = ChatMessage {
-      role: "assistant".to_owned(),
-      content: "A".to_owned(),
-      reasoning_content: None,
-      tool_call_id: None,
-      tool_calls: None,
-    };
-
-    message.apply_model_response_chunk(ChatResponseChunkDelta {
-      role: None,
-      content: None,
-      reasoning_content: None,
-      tool_calls: Some(vec![ToolCallRequestChunkDelta {
-        index: 0,
-        id: Some("123".to_owned()),
-        _type: Some("function".to_owned()),
-        function: Some(FunctionCallRequestChunkDelta {
-          name: Some("x".to_owned()),
-          arguments: None,
-        }),
-      }]),
-    });
-    assert_eq!(message.role, "assistant");
-    {
-      let tool_calls = message.tool_calls.as_ref().unwrap();
-      assert_eq!(tool_calls[0].id, "123");
-      assert_eq!(tool_calls[0].function.name, "x");
-    }
-
-    message.apply_model_response_chunk(ChatResponseChunkDelta {
-      role: None,
-      content: None,
-      reasoning_content: None,
-      tool_calls: Some(vec![ToolCallRequestChunkDelta {
-        index: 0,
-        id: None,
-        _type: None,
-        function: Some(FunctionCallRequestChunkDelta {
-          name: Some("yz".to_owned()),
-          arguments: Some("{\"a".to_owned()),
-        }),
-      }]),
-    });
-    {
-      let tool_calls = message.tool_calls.as_ref().unwrap();
-      assert_eq!(tool_calls[0].id, "123");
-      assert_eq!(tool_calls[0].function.name, "xyz");
-      assert_eq!(tool_calls[0].function.arguments, "{\"a");
-    }
-  }
-}
+mod tests;

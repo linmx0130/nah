@@ -45,7 +45,7 @@ pub struct MCPServerCommand {
 /**
  * MCP tool annotations, which contains some optional metadata.
  *
- * Following https://modelcontextprotocol.io/docs/concepts/tools#tool-definition-structure
+ * Following <https://modelcontextprotocol.io/docs/concepts/tools#tool-definition-structure>
  */
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MCPToolAnnotations {
@@ -64,7 +64,7 @@ pub struct MCPToolAnnotations {
 /**
  * Describe a MCP tool.
  *
- * Following https://modelcontextprotocol.io/docs/concepts/tools#tool-definition-structure
+ * Following <https://modelcontextprotocol.io/docs/concepts/tools#tool-definition-structure>
  */
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MCPToolDefinition {
