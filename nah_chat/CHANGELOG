@@ -1,0 +1,10 @@
+CHANGELOG of nah_chat
+===
+
+## v0.2.0
+* Accept `IntoIteratable` types of `ChatMessage` and parameters instead of `Vec` and `HashMap`.
+
+## v0.1.0
+Initial publish.
+* Async stream based chat completion API.
+* Chat related data structures.
