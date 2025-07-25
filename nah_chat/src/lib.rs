@@ -62,7 +62,6 @@ use bytes::Bytes;
 use futures_core::stream::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::HashMap;
 
 /**
  * Error kinds that may occur in `nah_chat`.
@@ -316,25 +315,29 @@ impl ChatClient {
    *
    * Args:
    * * `model` Name of the model to be called.
-   * * `messages` A [Vec] of [ChatMessage] as the context.
+   * * `messages` A list of [ChatMessage] as the context.
    * * `is_stream` Whether the request is stream-based.
    * * `params` Other parameters to be sent.
    */
-  pub fn create_chat_completion_request(
+  pub fn create_chat_completion_request<'a, 'b, P, M>(
     &self,
     model: &str,
-    messages: &Vec<ChatMessage>,
+    messages: M,
     is_stream: bool,
-    params: &HashMap<String, Value>,
-  ) -> reqwest::RequestBuilder {
+    params: P,
+  ) -> reqwest::RequestBuilder
+  where
+    P: IntoIterator<Item = (&'a String, &'a Value)>,
+    M: IntoIterator<Item = &'b ChatMessage>,
+  {
     let mut data = json!({
         "model": model.to_owned(),
-        "messages": messages.clone(),
+        "messages": messages.into_iter().collect::<Vec<_>>(),
         "stream": is_stream,
         "n": 1,
     });
 
-    params.iter().for_each(|(key, value)| {
+    params.into_iter().for_each(|(key, value)| {
       data
         .as_object_mut()
         .and_then(|o| o.insert(key.to_owned(), value.to_owned()));
@@ -359,15 +362,19 @@ impl ChatClient {
    *
    * Args:
    * * `model` Name of the model to be called.
-   * * `messages` A [Vec] of [ChatMessage] as the context.
+   * * `messages` An list of [ChatMessage] as the context.
    * * `params` Other parameters to be sent.
    */
-  pub async fn chat_completion_stream(
+  pub async fn chat_completion_stream<'a, 'b, P, M>(
     &self,
     model: &str,
-    messages: &Vec<ChatMessage>,
-    params: &HashMap<String, Value>,
-  ) -> Result<impl Stream<Item = Result<ChatResponseChunkDelta>>> {
+    messages: M,
+    params: P,
+  ) -> Result<impl Stream<Item = Result<ChatResponseChunkDelta>>>
+  where
+    P: IntoIterator<Item = (&'a String, &'a Value)>,
+    M: IntoIterator<Item = &'b ChatMessage>,
+  {
     let req = self.create_chat_completion_request(model, messages, true, params);
     let mut res = match req.send().await {
       Ok(r) => r,
