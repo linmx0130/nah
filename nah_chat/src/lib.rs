@@ -61,7 +61,7 @@ use async_stream::stream;
 use bytes::Bytes;
 use futures_core::stream::Stream;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Number, Value, json};
 
 /**
  * Error kinds that may occur in `nah_chat`.
@@ -280,6 +280,93 @@ pub struct FunctionCallRequest {
 pub struct FunctionCallRequestChunkDelta {
   pub name: Option<String>,
   pub arguments: Option<String>,
+}
+
+/**
+ * A builder for creating parameters for chat completion requests.
+ */
+#[derive(Debug, Clone)]
+pub struct ChatCompletionParamsBuilder {
+  data: std::collections::HashMap<String, Value>,
+}
+
+impl ChatCompletionParamsBuilder {
+  /**
+   * Initialize a [ChatCompletionParamsBuilder] object.
+   */
+  pub fn new() -> Self {
+    ChatCompletionParamsBuilder {
+      data: std::collections::HashMap::new(),
+    }
+  }
+
+  /**
+   * Consume the data builder to get a hash map of the parameters for chat completion requests.
+   */
+  pub fn build(self) -> std::collections::HashMap<String, Value> {
+    self.data
+  }
+
+  /**
+   * Set max token parameter.
+   */
+  pub fn max_token(&mut self, n: usize) -> &mut Self {
+    self.data.insert(
+      "max_token".to_owned(),
+      Value::Number(Number::from_u128(n as u128).unwrap()),
+    );
+    self
+  }
+
+  /**
+   * Set temperature parameter.
+   */
+  pub fn temperature(&mut self, t: f64) -> &mut Self {
+    self.data.insert(
+      "temperature".to_owned(),
+      Value::Number(Number::from_f64(t).unwrap()),
+    );
+    self
+  }
+
+  /**
+   * Set top_p parameter.
+   */
+  pub fn top_p(&mut self, p: f64) -> &mut Self {
+    self.data.insert(
+      "top_p".to_owned(),
+      Value::Number(Number::from_f64(p).unwrap()),
+    );
+    self
+  }
+
+  /**
+   * Set frequency_penalty parameter.
+   */
+  pub fn frequency_penalty(&mut self, p: f64) -> &mut Self {
+    self.data.insert(
+      "frequency_penalty".to_owned(),
+      Value::Number(Number::from_f64(p).unwrap()),
+    );
+    self
+  }
+
+  /**
+   * Set a parameter with key of `name` and value of `value`.
+   */
+  pub fn insert(&mut self, name: &str, value: Value) -> &mut Self {
+    self.data.insert(name.to_owned(), value);
+    self
+  }
+}
+
+impl<'a> std::iter::IntoIterator for &'a ChatCompletionParamsBuilder {
+  type Item = (&'a String, &'a Value);
+  type IntoIter = std::collections::hash_map::Iter<'a, String, Value>;
+
+  fn into_iter(self) -> Self::IntoIter {
+    (&self.data).into_iter()
+  }
 }
 
 /**
