@@ -17,7 +17,7 @@ use crate::AppContext;
 use crate::ModelConfig;
 use futures_util::pin_mut;
 use futures_util::stream::StreamExt;
-use nah_chat::{ChatClient, ChatMessage, ToolCallRequest};
+use nah_chat::{ChatClient, ChatCompletionParamsBuilder, ChatMessage, ToolCallRequest};
 use serde_json::{json, Value};
 use std::fs::{File, OpenOptions};
 use tokio::runtime::{Builder, Runtime};
@@ -197,14 +197,13 @@ impl ChatContext {
    * Generate assistant message.
    */
   pub fn generate(&mut self) -> Result<&ChatMessage, NahError> {
-    let mut params = HashMap::from([
-      ("max_token".to_owned(), json!(4096)),
-      ("tools".to_owned(), json!(self.tools.clone())),
-      ("n".to_owned(), json!(1)),
-      ("temperature".to_owned(), json!(0.7)),
-      ("top_p".to_owned(), json!(0.9)),
-      ("frequency_penalty".to_owned(), json!(0.5)),
-    ]);
+    let mut params_builder = ChatCompletionParamsBuilder::new();
+    params_builder
+      .max_token(4096)
+      .temperature(0.7)
+      .top_p(0.9)
+      .frequency_penalty(0.5)
+      .insert("tools", json!(self.tools.clone()));
 
     self
       .model_config
@@ -213,7 +212,7 @@ impl ChatContext {
       .and_then(|v| v.as_object())
       .and_then(|extra_params| {
         extra_params.iter().for_each(|(key, value)| {
-          params.insert(key.to_owned(), value.to_owned());
+          params_builder.insert(key, value.to_owned());
         });
         Some(())
       });
@@ -221,7 +220,7 @@ impl ChatContext {
     let message: Result<ChatMessage, NahError> = self.tokio_runtime.block_on(async {
       let stream = match self
         .chat_client
-        .chat_completion_stream(&self.model_config.model, &self.messages, &params)
+        .chat_completion_stream(&self.model_config.model, &self.messages, &params_builder)
         .await
       {
         Ok(s) => s,
