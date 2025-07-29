@@ -6,7 +6,7 @@ Supported features:
 * Stream generation
 * Tool calls
 * Reasoning content (Qwen3, Deepseek R1, etc)
-This crate is built on top of `tokio`, `reqwest` and `serde_json`.
+This crate is built on top of `reqwest` and `serde_json`.
 
 ```rust
 use nah_chat::{ChatClient, ChatMessage};
