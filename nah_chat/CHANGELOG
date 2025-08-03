@@ -1,5 +1,10 @@
 CHANGELOG of nah_chat
 ===
+## v0.4.0
+* Error handling and message formatting improvement.
+
+## v0.3.0 
+* Add ChatCompletionParamsBuilder.
 
 ## v0.2.0
 * Accept `IntoIteratable` types of `ChatMessage` and parameters instead of `Vec` and `HashMap`.
