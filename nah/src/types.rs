@@ -19,7 +19,11 @@ impl std::fmt::Display for NahError {
         write!(f, "NahError {}: {}", self.code, self.message)
       }
       Some(e) => {
-        write!(f, "NahError {}: {}, source: {}", self.code, self.message, e)
+        write!(
+          f,
+          "NahError {}: {}\ncaused by {}",
+          self.code, self.message, e
+        )
       }
     }
   }

@@ -415,16 +415,7 @@ impl ChatClient {
     M: IntoIterator<Item = &'b ChatMessage>,
   {
     let req = self.create_chat_completion_request(model, messages, true, params);
-    let mut res = match req.send().await {
-      Ok(r) => r,
-      Err(e) => {
-        return Err(Error {
-          kind: ErrorKind::NetworkError,
-          cause: Some(Box::new(e)),
-          message: None,
-        });
-      }
-    };
+    let mut res = req.send().await?;
 
     if !res.status().is_success() {
       let code = res.status().as_u16();
@@ -442,17 +433,9 @@ impl ChatClient {
     let stream = stream! {
       let mut reach_done = false;
       while !reach_done {
-        let chunk = match res.chunk().await {
-          Ok(Some(chunk)) => chunk,
-          Ok(None) => continue,
-          Err(e) => {
-            yield Err(Error{
-                kind: ErrorKind::NetworkError,
-                message: None,
-                cause: Some(Box::new(e))
-            });
-            break;
-          }
+        let chunk = match res.chunk().await? {
+          Some(chunk) => chunk,
+          None => continue,
         };
         let delta = self.get_model_response_chunk(chunk);
         match delta {

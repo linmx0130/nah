@@ -5,6 +5,7 @@
  */
 
 /// Error and related types.
+use reqwest;
 
 /**
  * Error kinds that may occur in `nah_chat`.
@@ -46,13 +47,36 @@ impl std::error::Error for Error {
 
 impl std::fmt::Display for Error {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(
-      f,
-      "{}: {}",
-      self.kind,
-      self.message.clone().unwrap_or("None".to_string()),
-    )
+    match &self.cause {
+      None => {
+        write!(
+          f,
+          "{}: {}",
+          self.kind,
+          self.message.clone().unwrap_or("None".to_string()),
+        )
+      }
+      Some(cause) => {
+        write!(
+          f,
+          "{}: {}\ncaused by {}",
+          self.kind,
+          self.message.clone().unwrap_or("None".to_string()),
+          cause
+        )
+      }
+    }
   }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+impl From<reqwest::Error> for Error {
+  fn from(error: reqwest::Error) -> Self {
+    Error {
+      kind: ErrorKind::NetworkError,
+      message: None,
+      cause: Some(Box::new(error)),
+    }
+  }
+}
