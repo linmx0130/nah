@@ -57,62 +57,14 @@
 //! This is a part of [nah](https://github.com/linmx0130/nah) project. `nah` means "*N*ot *A*
 //! *H*uman". Source code is available under [MPL-2.0](https://mozilla.org/MPL/2.0/).
 //!
+mod error;
+
 use async_stream::stream;
 use bytes::Bytes;
+pub use error::{Error, ErrorKind, Result};
 use futures_core::stream::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value, json};
-
-/**
- * Error kinds that may occur in `nah_chat`.
- */
-#[derive(Debug)]
-pub enum ErrorKind {
-  NetworkError,
-  ModelServerError,
-}
-
-impl std::fmt::Display for ErrorKind {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      ErrorKind::NetworkError => {
-        write!(f, "Network error")
-      }
-      ErrorKind::ModelServerError => {
-        write!(f, "Model server error")
-      }
-    }
-  }
-}
-
-/**
- * Error type of `nah_chat`.
- */
-#[derive(Debug)]
-pub struct Error {
-  kind: ErrorKind,
-  message: Option<String>,
-  cause: Option<Box<dyn std::error::Error>>,
-}
-
-impl std::error::Error for Error {
-  fn cause(&self) -> Option<&dyn std::error::Error> {
-    self.cause.as_ref().and_then(|e| Some(e.as_ref()))
-  }
-}
-
-impl std::fmt::Display for Error {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(
-      f,
-      "{}: {}",
-      self.kind,
-      self.message.clone().unwrap_or("None".to_string()),
-    )
-  }
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
 
 /**
  * Data structure of a chat message, could be from the user, the assistant or the tool.
@@ -463,16 +415,7 @@ impl ChatClient {
     M: IntoIterator<Item = &'b ChatMessage>,
   {
     let req = self.create_chat_completion_request(model, messages, true, params);
-    let mut res = match req.send().await {
-      Ok(r) => r,
-      Err(e) => {
-        return Err(Error {
-          kind: ErrorKind::NetworkError,
-          cause: Some(Box::new(e)),
-          message: None,
-        });
-      }
-    };
+    let mut res = req.send().await?;
 
     if !res.status().is_success() {
       let code = res.status().as_u16();
@@ -490,17 +433,9 @@ impl ChatClient {
     let stream = stream! {
       let mut reach_done = false;
       while !reach_done {
-        let chunk = match res.chunk().await {
-          Ok(Some(chunk)) => chunk,
-          Ok(None) => continue,
-          Err(e) => {
-            yield Err(Error{
-                kind: ErrorKind::NetworkError,
-                message: None,
-                cause: Some(Box::new(e))
-            });
-            break;
-          }
+        let chunk = match res.chunk().await? {
+          Some(chunk) => chunk,
+          None => continue,
         };
         let delta = self.get_model_response_chunk(chunk);
         match delta {
