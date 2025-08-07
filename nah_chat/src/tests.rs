@@ -93,3 +93,37 @@ fn test_chat_completion_params_builder() {
   assert_eq!(params["customized_key"], "customized_value");
   assert_eq!(params.len(), 4);
 }
+
+#[test]
+fn test_collect_chat_response_chunk_delta() {
+  let delta = vec![
+    ChatResponseChunkDelta {
+      role: Some("assistant".to_owned()),
+      content: None,
+      reasoning_content: None,
+      tool_calls: None,
+    },
+    ChatResponseChunkDelta {
+      role: None,
+      content: None,
+      reasoning_content: Some("think a bit".to_owned()),
+      tool_calls: None,
+    },
+    ChatResponseChunkDelta {
+      role: None,
+      content: Some("good content".to_owned()),
+      reasoning_content: None,
+      tool_calls: None,
+    },
+    ChatResponseChunkDelta {
+      role: None,
+      content: Some(" generated".to_owned()),
+      reasoning_content: None,
+      tool_calls: None,
+    },
+  ];
+  let message: ChatMessage = delta.into_iter().collect();
+  assert_eq!(message.role, "assistant");
+  assert_eq!(message.content, "good content generated");
+  assert_eq!(message.reasoning_content, Some("think a bit".to_owned()));
+}
