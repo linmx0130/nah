@@ -84,12 +84,12 @@ fn test_apply_tool_calls() {
 #[test]
 fn test_chat_completion_params_builder() {
   let mut params_builder = ChatCompletionParamsBuilder::new();
-  params_builder.temperature(0.7).top_p(0.9).max_token(10000);
+  params_builder.temperature(0.7).top_p(0.9).max_tokens(10000);
   params_builder.insert("customized_key", json!("customized_value"));
   let params = params_builder.build();
   assert_eq!(params["temperature"], 0.7);
   assert_eq!(params["top_p"], 0.9);
-  assert_eq!(params["max_token"], 10000);
+  assert_eq!(params["max_tokens"], 10000);
   assert_eq!(params["customized_key"], "customized_value");
   assert_eq!(params.len(), 4);
 }
