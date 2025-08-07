@@ -265,19 +265,33 @@ impl ChatClient {
     let stream = stream! {
       let mut reach_done = false;
       while !reach_done {
-        let chunk = match res.chunk().await? {
+        let chunk_data = match res.chunk().await? {
           Some(chunk) => chunk,
           None => continue,
         };
-        let delta = self.get_model_response_chunk(chunk);
-        match delta {
-          Some(ChatResponseChunk::Delta(d)) => {
-            yield Ok(d);
+        let chunk_data_str = match String::from_utf8(chunk_data.to_vec()) {
+            Ok(v) => v,
+            Err(e) => {
+                yield Err(Error {
+                    kind: ErrorKind::ModelServerError,
+                    message: Some(format!("Failed to decode model server response")),
+                    cause: Some(Box::new(e))
+                });
+                return;
+            }
+        };
+        let chunks = chunk_data_str.split("\n\n");
+        for chunk in chunks {
+          let delta = self.get_model_response_chunk(chunk);
+          match delta {
+            Some(ChatResponseChunk::Delta(d)) => {
+              yield Ok(d);
+            }
+            Some(ChatResponseChunk::Done) => {
+              reach_done = true;
+            }
+            None => {}
           }
-          Some(ChatResponseChunk::Done) => {
-            reach_done = true;
-          }
-          None => {}
         }
       }
     };
@@ -287,13 +301,7 @@ impl ChatClient {
   /**
    * Parse the stream data from the stream chat completion API to obtain a chunk delta.
    */
-  fn get_model_response_chunk(&self, chunk: Bytes) -> Option<ChatResponseChunk> {
-    let data_str = match String::from_utf8(chunk.to_vec()) {
-      Ok(v) => v,
-      Err(_) => {
-        return None;
-      }
-    };
+  fn get_model_response_chunk(&self, data_str: &str) -> Option<ChatResponseChunk> {
     if !data_str.starts_with("data: ") {
       return None;
     }
