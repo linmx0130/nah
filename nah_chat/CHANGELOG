@@ -1,5 +1,9 @@
 CHANGELOG of nah_chat
 ===
+## v0.5.0
+* Fix `max_tokens` parameter name
+* Implement `FromIterator`, `Default` and `Extend` for `ChatMessage`.
+
 ## v0.4.0
 * Error handling and message formatting improvement.
 
