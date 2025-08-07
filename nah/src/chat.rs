@@ -199,7 +199,7 @@ impl ChatContext {
   pub fn generate(&mut self) -> Result<&ChatMessage, NahError> {
     let mut params_builder = ChatCompletionParamsBuilder::new();
     params_builder
-      .max_token(4096)
+      .max_tokens(4096)
       .temperature(0.7)
       .top_p(0.9)
       .frequency_penalty(0.5)

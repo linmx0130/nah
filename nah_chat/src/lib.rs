@@ -262,9 +262,9 @@ impl ChatCompletionParamsBuilder {
   /**
    * Set max token parameter.
    */
-  pub fn max_token(&mut self, n: usize) -> &mut Self {
+  pub fn max_tokens(&mut self, n: usize) -> &mut Self {
     self.data.insert(
-      "max_token".to_owned(),
+      "max_tokens".to_owned(),
       Value::Number(Number::from_u128(n as u128).unwrap()),
     );
     self
