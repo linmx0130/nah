@@ -80,14 +80,11 @@ where
             );
         }
     };
-    let name = match params.get("name").and_then(|s| s.as_str()) {
-        Some(n) => n,
-        None => {
-            return invalid_params_error_response(
-                id,
-                "Missing or invalid name param for tools/call request".to_string(),
-            );
-        }
+    let Some(name) = params.get("name").and_then(|s| s.as_str()) else {
+        return invalid_params_error_response(
+            id,
+            "Missing or invalid name param for tools/call request".to_string(),
+        );
     };
     let args = params.get("arguments").and_then(|v| v.as_object());
     let response_content = server.on_tool_call(name, args);

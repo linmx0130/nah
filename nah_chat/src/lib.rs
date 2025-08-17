@@ -63,7 +63,6 @@ pub use error::{Error, ErrorKind, Result};
 pub use message::*;
 
 use async_stream::stream;
-use bytes::Bytes;
 use futures_core::stream::Stream;
 use serde_json::{Number, Value, json};
 /**
@@ -265,9 +264,8 @@ impl ChatClient {
     let stream = stream! {
       let mut reach_done = false;
       while !reach_done {
-        let chunk_data = match res.chunk().await? {
-          Some(chunk) => chunk,
-          None => continue,
+        let Some(chunk_data) = res.chunk().await? else {
+            continue;
         };
         let chunk_data_str = match String::from_utf8(chunk_data.to_vec()) {
             Ok(v) => v,

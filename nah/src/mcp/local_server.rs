@@ -54,11 +54,9 @@ impl MCPServer for MCPLocalServerProcess {
     let mut buf = String::new();
     loop {
       let incoming_msg = self.receive_data::<Value>(&mut buf)?;
-      let incoming_obj = incoming_msg.as_object();
-      if incoming_obj.is_none() {
-        continue;
-      }
-      let incoming_data = incoming_obj.unwrap();
+      let Some(incoming_data) = incoming_msg.as_object() else {
+          continue;
+      };
       match incoming_data.get("id").and_then(|v| v.as_str()) {
         None => {
           // Try to unpack the message as a notification
