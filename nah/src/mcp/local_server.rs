@@ -55,7 +55,7 @@ impl MCPServer for MCPLocalServerProcess {
     loop {
       let incoming_msg = self.receive_data::<Value>(&mut buf)?;
       let Some(incoming_data) = incoming_msg.as_object() else {
-          continue;
+        continue;
       };
       match incoming_data.get("id").and_then(|v| v.as_str()) {
         None => {
