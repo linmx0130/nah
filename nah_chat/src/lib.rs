@@ -272,7 +272,7 @@ impl ChatClient {
             Err(e) => {
                 yield Err(Error {
                     kind: ErrorKind::ModelServerError,
-                    message: Some(format!("Failed to decode model server response")),
+                    message: Some("Failed to decode model server response".to_string()),
                     cause: Some(Box::new(e))
                 });
                 return;
@@ -315,7 +315,7 @@ impl ChatClient {
       .as_object()
       .and_then(|chunk| chunk.get("choices"))
       .and_then(|choices_value| choices_value.as_array())
-      .and_then(|choices_arr| choices_arr.get(0))
+      .and_then(|choices_arr| choices_arr.first())
       .and_then(|choice_value| choice_value.as_object())
       .and_then(|choice_obj| choice_obj.get("delta"));
 

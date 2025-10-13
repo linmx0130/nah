@@ -4,6 +4,57 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 use serde::{Deserialize, Serialize};
+/**
+ * This is used to represent a URL in the message content. Currently, only
+ * images will be represented in this format.
+ */
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct URLObject {
+  pub url: String,
+}
+
+/**
+ * This is used to represent a message content that can have multiple types
+ * with a type annotation. Currently, it supports text and image_url.
+ */
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct TypedChatMessageContent {
+  #[serde(rename = "type")]
+  pub data_type: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub text: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub image_url: Option<URLObject>,
+}
+
+/**
+ * Type for message contents.
+ *
+ * It can be either a text message or a `TypedChatMessageContent`.
+ */
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum ChatMessageContentValue {
+  Text(String),
+  TypedContent(TypedChatMessageContent),
+}
+
+impl std::fmt::Display for ChatMessageContentValue {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      ChatMessageContentValue::Text(text) => write!(f, "{}", text),
+      ChatMessageContentValue::TypedContent(typed_content) => {
+        if let Some(text) = &typed_content.text {
+          write!(f, "{text}")
+        } else if let Some(image_url) = &typed_content.image_url {
+          write!(f, "[Image URL: {}]", image_url.url)
+        } else {
+          write!(f, "[Unknown type: {}]", typed_content.data_type)
+        }
+      }
+    }
+  }
+}
 
 /**
  * Data structure of a chat message, could be from the user, the assistant or the tool.
@@ -12,8 +63,10 @@ use serde::{Deserialize, Serialize};
 pub struct ChatMessage {
   /** The role of the message. */
   pub role: String,
-  /** Text string content of the message */
-  pub content: String,
+
+  /** Content of the message */
+  pub content: ChatMessageContentValue,
+
   /** Reasoning content in string */
   #[serde(rename = "reasoningContent", skip_serializing_if = "Option::is_none")]
   pub reasoning_content: Option<String>,
@@ -22,8 +75,10 @@ pub struct ChatMessage {
    *
    * Only valid for messages with `role` of `"tool"`.
    */
+
   #[serde(skip_serializing_if = "Option::is_none")]
   pub tool_call_id: Option<String>,
+
   /**
    * The tool calls requested by the model.
    *
@@ -40,7 +95,7 @@ impl ChatMessage {
   pub fn new() -> Self {
     ChatMessage {
       role: String::new(),
-      content: String::new(),
+      content: ChatMessageContentValue::Text(String::new()),
       reasoning_content: None,
       tool_call_id: None,
       tool_calls: None,
@@ -55,7 +110,12 @@ impl ChatMessage {
       Some(())
     });
     chunk.content.and_then(|content| {
-      self.content.push_str(&content);
+      match &mut self.content {
+        ChatMessageContentValue::Text(t) => t.push_str(&content),
+        _ => {
+          // Cannot apply the chunk. Ignore.
+        }
+      }
       Some(())
     });
     chunk

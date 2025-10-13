@@ -10,7 +10,7 @@ use super::*;
 fn test_apply_text_and_reasoning_content_chunk() {
   let mut message = ChatMessage {
     role: "assistant".to_owned(),
-    content: "A".to_owned(),
+    content: ChatMessageContentValue::Text("A".to_owned()),
     reasoning_content: None,
     tool_call_id: None,
     tool_calls: None,
@@ -24,7 +24,10 @@ fn test_apply_text_and_reasoning_content_chunk() {
   });
 
   assert_eq!(message.role, "assistant");
-  assert_eq!(message.content, "A test");
+  assert_eq!(
+    message.content,
+    ChatMessageContentValue::Text("A test".to_owned())
+  );
   assert_eq!(message.reasoning_content.unwrap(), "reason");
 }
 
@@ -32,7 +35,7 @@ fn test_apply_text_and_reasoning_content_chunk() {
 fn test_apply_tool_calls() {
   let mut message = ChatMessage {
     role: "assistant".to_owned(),
-    content: "A".to_owned(),
+    content: ChatMessageContentValue::Text("A".to_owned()),
     reasoning_content: None,
     tool_call_id: None,
     tool_calls: None,
@@ -124,6 +127,50 @@ fn test_collect_chat_response_chunk_delta() {
   ];
   let message: ChatMessage = delta.into_iter().collect();
   assert_eq!(message.role, "assistant");
-  assert_eq!(message.content, "good content generated");
+  assert_eq!(
+    message.content,
+    ChatMessageContentValue::Text("good content generated".to_owned())
+  );
   assert_eq!(message.reasoning_content, Some("think a bit".to_owned()));
+}
+
+#[test]
+fn test_deserialize_text_content() {
+  let data = r#"{
+      "role": "user",
+      "content": "Hello world"
+    }
+    "#;
+  let message: ChatMessage = serde_json::from_str(data).unwrap();
+  assert_eq!(message.role, "user");
+  assert_eq!(
+    message.content,
+    ChatMessageContentValue::Text("Hello world".to_string())
+  );
+}
+
+#[test]
+fn test_deserialize_image_url() {
+  let data = r#"{
+      "role": "user",
+      "content": {
+        "type": "image_url",
+        "image_url": {
+          "url": "data:image/jpeg;base64"
+        }
+      }
+    }
+    "#;
+  let message: ChatMessage = serde_json::from_str(data).unwrap();
+  assert_eq!(message.role, "user");
+  assert_eq!(
+    message.content,
+    ChatMessageContentValue::TypedContent(TypedChatMessageContent {
+      data_type: "image_url".to_string(),
+      image_url: Some(URLObject {
+        url: "data:image/jpeg;base64".to_string()
+      }),
+      text: None
+    })
+  );
 }
