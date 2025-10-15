@@ -206,7 +206,6 @@ impl ChatClient {
         "stream": is_stream,
         "n": 1,
     });
-
     params.into_iter().for_each(|(key, value)| {
       data
         .as_object_mut()

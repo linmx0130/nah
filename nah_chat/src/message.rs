@@ -27,6 +27,26 @@ pub struct TypedChatMessageContent {
   pub image_url: Option<URLObject>,
 }
 
+impl TypedChatMessageContent {
+  pub fn text_content(text: &str) -> TypedChatMessageContent {
+    TypedChatMessageContent {
+      data_type: "text".to_owned(),
+      text: Some(text.to_owned()),
+      image_url: None,
+    }
+  }
+
+  pub fn image_url_content(image_url: &str) -> TypedChatMessageContent {
+    TypedChatMessageContent {
+      data_type: "image_url".to_owned(),
+      text: None,
+      image_url: Some(URLObject {
+        url: image_url.to_owned(),
+      }),
+    }
+  }
+}
+
 /**
  * Type for message contents.
  *
@@ -36,21 +56,25 @@ pub struct TypedChatMessageContent {
 #[serde(untagged)]
 pub enum ChatMessageContentValue {
   Text(String),
-  TypedContent(TypedChatMessageContent),
+  TypedContentList(Vec<TypedChatMessageContent>),
 }
 
 impl std::fmt::Display for ChatMessageContentValue {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
       ChatMessageContentValue::Text(text) => write!(f, "{}", text),
-      ChatMessageContentValue::TypedContent(typed_content) => {
-        if let Some(text) = &typed_content.text {
-          write!(f, "{text}")
-        } else if let Some(image_url) = &typed_content.image_url {
-          write!(f, "[Image URL: {}]", image_url.url)
-        } else {
-          write!(f, "[Unknown type: {}]", typed_content.data_type)
+      ChatMessageContentValue::TypedContentList(typed_content_list) => {
+        let mut buffer = String::new();
+        for typed_content in typed_content_list {
+          if let Some(text) = &typed_content.text {
+            buffer += text
+          } else if let Some(image_url) = &typed_content.image_url {
+            buffer += &format!("[Image URL: {}]", image_url.url);
+          } else {
+            buffer += &format!("[Unknown type: {}]", typed_content.data_type);
+          }
         }
+        write!(f, "{}", buffer)
       }
     }
   }
@@ -101,6 +125,7 @@ impl ChatMessage {
       tool_calls: None,
     }
   }
+
   /**
    * Consume the chunk delta return from the chat completion stream API and apply it on to the message.
    */
@@ -172,6 +197,19 @@ impl ChatMessage {
       }
       Some(())
     });
+  }
+
+  /**
+   * Create a pure text user message.
+   */
+  pub fn user_text_message(text: &str) -> ChatMessage {
+    ChatMessage {
+      role: "user".to_owned(),
+      content: ChatMessageContentValue::Text(text.to_owned()),
+      reasoning_content: None,
+      tool_call_id: None,
+      tool_calls: None,
+    }
   }
 }
 
