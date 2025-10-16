@@ -153,24 +153,24 @@ fn test_deserialize_text_content() {
 fn test_deserialize_image_url() {
   let data = r#"{
       "role": "user",
-      "content": {
+      "content": [{
         "type": "image_url",
         "image_url": {
           "url": "data:image/jpeg;base64"
         }
-      }
+      }]
     }
     "#;
   let message: ChatMessage = serde_json::from_str(data).unwrap();
   assert_eq!(message.role, "user");
   assert_eq!(
     message.content,
-    ChatMessageContentValue::TypedContent(TypedChatMessageContent {
+    ChatMessageContentValue::TypedContentList(vec![TypedChatMessageContent {
       data_type: "image_url".to_string(),
       image_url: Some(URLObject {
         url: "data:image/jpeg;base64".to_string()
       }),
       text: None
-    })
+    }])
   );
 }
