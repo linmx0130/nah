@@ -174,8 +174,8 @@ impl ChatClient {
   pub fn init(base_url: String, auth_token: Option<String>) -> Self {
     let client = reqwest::Client::new();
     ChatClient {
-      base_url: base_url,
-      auth_token: auth_token,
+      base_url,
+      auth_token,
       http_client: client,
     }
   }
@@ -245,31 +245,38 @@ impl ChatClient {
   {
     let req = self.create_chat_completion_request(model, messages, false, params);
     let res_text = req.send().await?.text().await?;
-    let response_data: Value = serde_json::from_str(&res_text).map_err(|e| Error {
+    let mut response_data: Value = serde_json::from_str(&res_text).map_err(|e| Error {
       kind: ErrorKind::ModelServerError,
       message: Some("Failed to parse model server response".to_string()),
       cause: Some(Box::new(e)),
     })?;
-    let choice = response_data
-      .get("choices")
-      .and_then(|choices| choices.as_array())
-      .and_then(|choices| choices.first())
+    let mut choices = response_data
+      .as_object_mut()
+      .and_then(|obj| obj.remove("choices"))
       .ok_or(Error {
         kind: ErrorKind::ModelServerError,
-        message: Some("Invalid response format: missing choices".to_string()),
+        message: Some("Invalid response format: missing choices field".to_string()),
+        cause: None,
+      })?;
+    let choice: &mut Value = choices
+      .as_array_mut()
+      .and_then(|choices| choices.first_mut())
+      .ok_or(Error {
+        kind: ErrorKind::ModelServerError,
+        message: Some("Invalid response format: missing choices item".to_string()),
         cause: None,
       })?;
 
     let message_value: Value = choice
-      .get("message")
+      .as_object_mut()
+      .and_then(|choice| choice.remove("message"))
       .ok_or(Error {
         kind: ErrorKind::ModelServerError,
         message: Some("Invalid response format: missing message".to_string()),
         cause: None,
-      })?
-      .clone();
+      })?;
 
-    let message: ChatMessage = match serde_json::from_value(message_value.clone()) {
+    let message: ChatMessage = match serde_json::from_value(message_value) {
       Ok(m) => m,
       Err(e) => {
         return Err(Error {
