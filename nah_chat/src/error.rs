@@ -4,8 +4,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-/// Error and related types.
-use reqwest;
+//! Error and related types.
 
 /**
  * Error kinds that may occur in `nah_chat`.
@@ -41,7 +40,7 @@ pub struct Error {
 
 impl std::error::Error for Error {
   fn cause(&self) -> Option<&dyn std::error::Error> {
-    self.cause.as_ref().and_then(|e| Some(e.as_ref()))
+    self.cause.as_ref().map(|e| e.as_ref())
   }
 }
 

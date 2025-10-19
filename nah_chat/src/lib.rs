@@ -174,8 +174,8 @@ impl ChatClient {
   pub fn init(base_url: String, auth_token: Option<String>) -> Self {
     let client = reqwest::Client::new();
     ChatClient {
-      base_url: base_url,
-      auth_token: auth_token,
+      base_url,
+      auth_token,
       http_client: client,
     }
   }
@@ -206,7 +206,6 @@ impl ChatClient {
         "stream": is_stream,
         "n": 1,
     });
-
     params.into_iter().for_each(|(key, value)| {
       data
         .as_object_mut()
@@ -225,6 +224,69 @@ impl ChatClient {
     }
 
     req
+  }
+  /**
+   * Request chat completion in the non-stream approach.
+   *
+   * Args:
+   * * `model` Name of the model to be called.
+   * * `messages` An list of [ChatMessage] as the context.
+   * * `params` Other parameters to be sent.
+   */
+  pub async fn chat_completion<'a, 'b, P, M>(
+    &self,
+    model: &str,
+    messages: M,
+    params: P,
+  ) -> Result<ChatMessage>
+  where
+    P: IntoIterator<Item = (&'a String, &'a Value)>,
+    M: IntoIterator<Item = &'b ChatMessage>,
+  {
+    let req = self.create_chat_completion_request(model, messages, false, params);
+    let res_text = req.send().await?.text().await?;
+    let mut response_data: Value = serde_json::from_str(&res_text).map_err(|e| Error {
+      kind: ErrorKind::ModelServerError,
+      message: Some("Failed to parse model server response".to_string()),
+      cause: Some(Box::new(e)),
+    })?;
+    let mut choices = response_data
+      .as_object_mut()
+      .and_then(|obj| obj.remove("choices"))
+      .ok_or(Error {
+        kind: ErrorKind::ModelServerError,
+        message: Some("Invalid response format: missing choices field".to_string()),
+        cause: None,
+      })?;
+    let choice: &mut Value = choices
+      .as_array_mut()
+      .and_then(|choices| choices.first_mut())
+      .ok_or(Error {
+        kind: ErrorKind::ModelServerError,
+        message: Some("Invalid response format: missing choices item".to_string()),
+        cause: None,
+      })?;
+
+    let message_value: Value = choice
+      .as_object_mut()
+      .and_then(|choice| choice.remove("message"))
+      .ok_or(Error {
+        kind: ErrorKind::ModelServerError,
+        message: Some("Invalid response format: missing message".to_string()),
+        cause: None,
+      })?;
+
+    let message: ChatMessage = match serde_json::from_value(message_value) {
+      Ok(m) => m,
+      Err(e) => {
+        return Err(Error {
+          kind: ErrorKind::ModelServerError,
+          message: Some("Failed to parse message from response".to_string()),
+          cause: Some(Box::new(e)),
+        });
+      }
+    };
+    Ok(message)
   }
 
   /**
@@ -272,7 +334,7 @@ impl ChatClient {
             Err(e) => {
                 yield Err(Error {
                     kind: ErrorKind::ModelServerError,
-                    message: Some(format!("Failed to decode model server response")),
+                    message: Some("Failed to decode model server response".to_string()),
                     cause: Some(Box::new(e))
                 });
                 return;
@@ -315,7 +377,7 @@ impl ChatClient {
       .as_object()
       .and_then(|chunk| chunk.get("choices"))
       .and_then(|choices_value| choices_value.as_array())
-      .and_then(|choices_arr| choices_arr.get(0))
+      .and_then(|choices_arr| choices_arr.first())
       .and_then(|choice_value| choice_value.as_object())
       .and_then(|choice_obj| choice_obj.get("delta"));
 

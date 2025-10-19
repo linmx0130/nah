@@ -17,7 +17,9 @@ use crate::AppContext;
 use crate::ModelConfig;
 use futures_util::pin_mut;
 use futures_util::stream::StreamExt;
-use nah_chat::{ChatClient, ChatCompletionParamsBuilder, ChatMessage, ToolCallRequest};
+use nah_chat::{
+  ChatClient, ChatCompletionParamsBuilder, ChatMessage, ChatMessageContentValue, ToolCallRequest,
+};
 use serde_json::{json, Value};
 use std::fs::{File, OpenOptions};
 use tokio::runtime::{Builder, Runtime};
@@ -72,7 +74,7 @@ pub fn process_chat(context: &mut AppContext) {
     .and_then(|sys| {
       chat_context.messages.push(ChatMessage {
         role: "system".to_string(),
-        content: sys.to_string(),
+        content: ChatMessageContentValue::Text(sys.to_string()),
         reasoning_content: None,
         tool_call_id: None,
         tool_calls: None,
@@ -186,7 +188,7 @@ impl ChatContext {
   pub fn user_message(&mut self, message: String) {
     self.push_message(ChatMessage {
       role: "user".to_string(),
-      content: message,
+      content: ChatMessageContentValue::Text(message),
       reasoning_content: None,
       tool_call_id: None,
       tool_calls: None,
@@ -324,7 +326,7 @@ impl ChatContext {
         println!("[Tool: {}]: {}", server_name, text_content);
         tool_call_responses.push(ChatMessage {
           role: "tool".to_owned(),
-          content: text_content,
+          content: ChatMessageContentValue::Text(text_content),
           reasoning_content: None,
           tool_call_id: Some(item.id.to_owned()),
           tool_calls: None,

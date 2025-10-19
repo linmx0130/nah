@@ -4,6 +4,81 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 use serde::{Deserialize, Serialize};
+/**
+ * This is used to represent a URL in the message content. Currently, only
+ * images will be represented in this format.
+ */
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct URLObject {
+  pub url: String,
+}
+
+/**
+ * This is used to represent a message content that can have multiple types
+ * with a type annotation. Currently, it supports text and image_url.
+ */
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct TypedChatMessageContent {
+  #[serde(rename = "type")]
+  pub data_type: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub text: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub image_url: Option<URLObject>,
+}
+
+impl TypedChatMessageContent {
+  pub fn text_content(text: &str) -> TypedChatMessageContent {
+    TypedChatMessageContent {
+      data_type: "text".to_owned(),
+      text: Some(text.to_owned()),
+      image_url: None,
+    }
+  }
+
+  pub fn image_url_content(image_url: &str) -> TypedChatMessageContent {
+    TypedChatMessageContent {
+      data_type: "image_url".to_owned(),
+      text: None,
+      image_url: Some(URLObject {
+        url: image_url.to_owned(),
+      }),
+    }
+  }
+}
+
+/**
+ * Type for message contents.
+ *
+ * It can be either a text message or a `TypedChatMessageContent`.
+ */
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum ChatMessageContentValue {
+  Text(String),
+  TypedContentList(Vec<TypedChatMessageContent>),
+}
+
+impl std::fmt::Display for ChatMessageContentValue {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      ChatMessageContentValue::Text(text) => write!(f, "{}", text),
+      ChatMessageContentValue::TypedContentList(typed_content_list) => {
+        let mut buffer = String::new();
+        for typed_content in typed_content_list {
+          if let Some(text) = &typed_content.text {
+            buffer += text
+          } else if let Some(image_url) = &typed_content.image_url {
+            buffer += &format!("[Image URL: {}]", image_url.url);
+          } else {
+            buffer += &format!("[Unknown type: {}]", typed_content.data_type);
+          }
+        }
+        write!(f, "{}", buffer)
+      }
+    }
+  }
+}
 
 /**
  * Data structure of a chat message, could be from the user, the assistant or the tool.
@@ -12,8 +87,10 @@ use serde::{Deserialize, Serialize};
 pub struct ChatMessage {
   /** The role of the message. */
   pub role: String,
-  /** Text string content of the message */
-  pub content: String,
+
+  /** Content of the message */
+  pub content: ChatMessageContentValue,
+
   /** Reasoning content in string */
   #[serde(rename = "reasoningContent", skip_serializing_if = "Option::is_none")]
   pub reasoning_content: Option<String>,
@@ -22,8 +99,10 @@ pub struct ChatMessage {
    *
    * Only valid for messages with `role` of `"tool"`.
    */
+
   #[serde(skip_serializing_if = "Option::is_none")]
   pub tool_call_id: Option<String>,
+
   /**
    * The tool calls requested by the model.
    *
@@ -40,12 +119,13 @@ impl ChatMessage {
   pub fn new() -> Self {
     ChatMessage {
       role: String::new(),
-      content: String::new(),
+      content: ChatMessageContentValue::Text(String::new()),
       reasoning_content: None,
       tool_call_id: None,
       tool_calls: None,
     }
   }
+
   /**
    * Consume the chunk delta return from the chat completion stream API and apply it on to the message.
    */
@@ -55,7 +135,12 @@ impl ChatMessage {
       Some(())
     });
     chunk.content.and_then(|content| {
-      self.content.push_str(&content);
+      match &mut self.content {
+        ChatMessageContentValue::Text(t) => t.push_str(&content),
+        _ => {
+          // Cannot apply the chunk. Ignore.
+        }
+      }
       Some(())
     });
     chunk
@@ -112,6 +197,19 @@ impl ChatMessage {
       }
       Some(())
     });
+  }
+
+  /**
+   * Create a pure text user message.
+   */
+  pub fn user_text_message(text: &str) -> ChatMessage {
+    ChatMessage {
+      role: "user".to_owned(),
+      content: ChatMessageContentValue::Text(text.to_owned()),
+      reasoning_content: None,
+      tool_call_id: None,
+      tool_calls: None,
+    }
   }
 }
 
