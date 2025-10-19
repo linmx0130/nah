@@ -4,7 +4,6 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-use futures_util::{StreamExt, pin_mut};
 use nah_chat::{ChatClient, ChatMessage, ChatMessageContentValue, TypedChatMessageContent};
 use std::collections::HashMap;
 use std::io;
@@ -31,27 +30,10 @@ async fn main() -> io::Result<()> {
     tool_calls: None,
   }];
   let params = HashMap::new();
-  let stream = chat_client
-    .chat_completion_stream(&model_name, &messages, &params)
+  let message = chat_client
+    .chat_completion(&model_name, &messages, &params)
     .await
     .unwrap();
-  pin_mut!(stream);
-
-  // buffer for the new message
-  let mut message = ChatMessage::new();
-
-  // consume the stream
-  while let Some(delta_result) = stream.next().await {
-    match delta_result {
-      Ok(delta) => {
-        println!("{:?}", delta);
-        message.apply_model_response_chunk(delta);
-      }
-      Err(e) => {
-        eprintln!("Error occurred while processing the chat completion: {}", e);
-      }
-    }
-  }
   println!("{}", message.content);
   Ok(())
 }

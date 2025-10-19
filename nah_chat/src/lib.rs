@@ -225,6 +225,62 @@ impl ChatClient {
 
     req
   }
+  /**
+   * Request chat completion in the non-stream approach.
+   *
+   * Args:
+   * * `model` Name of the model to be called.
+   * * `messages` An list of [ChatMessage] as the context.
+   * * `params` Other parameters to be sent.
+   */
+  pub async fn chat_completion<'a, 'b, P, M>(
+    &self,
+    model: &str,
+    messages: M,
+    params: P,
+  ) -> Result<ChatMessage>
+  where
+    P: IntoIterator<Item = (&'a String, &'a Value)>,
+    M: IntoIterator<Item = &'b ChatMessage>,
+  {
+    let req = self.create_chat_completion_request(model, messages, false, params);
+    let res_text = req.send().await?.text().await?;
+    let response_data: Value = serde_json::from_str(&res_text).map_err(|e| Error {
+      kind: ErrorKind::ModelServerError,
+      message: Some("Failed to parse model server response".to_string()),
+      cause: Some(Box::new(e)),
+    })?;
+    let choice = response_data
+      .get("choices")
+      .and_then(|choices| choices.as_array())
+      .and_then(|choices| choices.first())
+      .ok_or(Error {
+        kind: ErrorKind::ModelServerError,
+        message: Some("Invalid response format: missing choices".to_string()),
+        cause: None,
+      })?;
+
+    let message_value: Value = choice
+      .get("message")
+      .ok_or(Error {
+        kind: ErrorKind::ModelServerError,
+        message: Some("Invalid response format: missing message".to_string()),
+        cause: None,
+      })?
+      .clone();
+
+    let message: ChatMessage = match serde_json::from_value(message_value.clone()) {
+      Ok(m) => m,
+      Err(e) => {
+        return Err(Error {
+          kind: ErrorKind::ModelServerError,
+          message: Some("Failed to parse message from response".to_string()),
+          cause: Some(Box::new(e)),
+        });
+      }
+    };
+    Ok(message)
+  }
 
   /**
    * Request chat completion in the async stream approach.
