@@ -7,12 +7,14 @@
 //!
 //! # Introduction
 //! This crate exposes an async stream API for the widely-used OpenAI
-//! [chat completion API](https://platform.openai.com/docs/api-reference/chat).
+//! [chat completion API](https://platform.openai.com/docs/api-reference/chat) and the
+//! [Responses API](https://platform.openai.com/docs/api-reference/responses).
 //!
 //! Supported features:
 //! * Stream generation
 //! * Tool calls
 //! * Reasoning content (Qwen3, Deepseek R1, etc)
+//! * Responses API (stream + non-stream, tool calls, reasoning)
 //!
 //! This crate is built on top of `tokio`, `reqwest` and `serde_json`.
 //!
@@ -59,8 +61,10 @@
 //!
 mod error;
 mod message;
+mod responses;
 pub use error::{Error, ErrorKind, Result};
 pub use message::*;
+pub use responses::*;
 
 use async_stream::stream;
 use futures_core::stream::Stream;
@@ -327,7 +331,7 @@ impl ChatClient {
       let mut reach_done = false;
       while !reach_done {
         let Some(chunk_data) = res.chunk().await? else {
-            continue;
+            break;
         };
         let chunk_data_str = match String::from_utf8(chunk_data.to_vec()) {
             Ok(v) => v,
