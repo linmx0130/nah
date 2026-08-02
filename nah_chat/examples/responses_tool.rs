@@ -6,6 +6,7 @@
 
 use futures_util::{StreamExt, pin_mut};
 use nah_chat::{ChatClient, ResponsesInput, ResponsesParamsBuilder, ResponsesStreamEvent};
+use serde_json::json;
 use std::io::Write;
 
 #[tokio::main(flavor = "current_thread")]
@@ -16,30 +17,26 @@ async fn main() -> std::io::Result<()> {
   let model = std::env::var("MODEL").unwrap_or_else(|_| "deepseek-v4-flash".to_string());
 
   let client = ChatClient::init(base_url, Some(auth_token));
-  let input =
-    ResponsesInput::Text("Hi, how are you? Please introduce yourself in one sentence.".to_string());
+
+  // The Responses API tool format is FLAT: {"type":"function","name":...,"parameters":...}
+  let tools = json!([{
+    "type": "function",
+    "name": "get_weather",
+    "description": "Get the weather of a city",
+    "parameters": {
+      "type": "object",
+      "properties": {"city": {"type": "string"}},
+      "required": ["city"]
+    }
+  }]);
+
   let mut params = ResponsesParamsBuilder::new();
   params
     .instructions("You are a helpful assistant.")
-    .reasoning(serde_json::json!({"effort": "high"}));
+    .tools(tools)
+    .tool_choice(json!("auto"));
 
-  println!("== Non-stream ==");
-  let response = client.responses(&model, &input, &params).await.unwrap();
-  println!("{}", response.output_text());
-  if let Some(usage) = &response.usage {
-    println!(
-      "usage: input={:?} output={:?} total={:?} (reasoning_tokens={:?})",
-      usage.input_tokens,
-      usage.output_tokens,
-      usage.total_tokens,
-      usage
-        .output_tokens_details
-        .as_ref()
-        .and_then(|d| d.reasoning_tokens)
-    );
-  }
-
-  println!("== Stream ==");
+  let input = ResponsesInput::Text("What is the weather in San Francisco?".to_string());
   let stream = client
     .responses_stream(&model, &input, &params)
     .await
@@ -47,25 +44,29 @@ async fn main() -> std::io::Result<()> {
   pin_mut!(stream);
   while let Some(event_result) = stream.next().await {
     match event_result.unwrap() {
-      ResponsesStreamEvent::ReasoningTextDelta { delta, .. } => {
+      ResponsesStreamEvent::FunctionCallArgumentsDelta { delta, .. } => {
         eprint!("{}", delta);
+        let _ = std::io::stdout().flush();
       }
       ResponsesStreamEvent::OutputTextDelta { delta, .. } => {
         print!("{}", delta);
         let _ = std::io::stdout().flush();
       }
       ResponsesStreamEvent::Completed(response) => {
-        println!(
-          "\n[completed] status={}, total_tokens={:?}",
-          response.status,
-          response.usage.as_ref().and_then(|u| u.total_tokens)
-        );
+        println!("\n[completed] status={}", response.status);
+        for call in response.function_calls() {
+          println!(
+            "[function_call] name={} arguments={}",
+            call.name.as_deref().unwrap_or(""),
+            call.arguments.as_deref().unwrap_or("")
+          );
+        }
       }
       ResponsesStreamEvent::Incomplete(response) => {
-        println!("\n[incomplete] status={}", response.status);
+        println!("\n[incomplete] status={}", response.status)
       }
       ResponsesStreamEvent::Failed(response) => {
-        println!("\n[failed] error={:?}", response.error);
+        println!("\n[failed] error={:?}", response.error)
       }
       _ => {}
     }
