@@ -69,6 +69,8 @@ pub use responses::*;
 use async_stream::stream;
 use futures_core::stream::Stream;
 use serde_json::{Number, Value, json};
+
+use responses::SseBuffer;
 /**
  * A builder for creating parameters for chat completion requests.
  */
@@ -248,7 +250,20 @@ impl ChatClient {
     M: IntoIterator<Item = &'b ChatMessage>,
   {
     let req = self.create_chat_completion_request(model, messages, false, params);
-    let res_text = req.send().await?.text().await?;
+    let res = req.send().await?;
+    if !res.status().is_success() {
+      let code = res.status().as_u16();
+      let error_content = res.text().await.unwrap();
+      return Err(Error {
+        kind: ErrorKind::ModelServerError,
+        message: Some(format!(
+          "Model server responded with error: HTTP status {}, error message = {}",
+          code, error_content
+        )),
+        cause: None,
+      });
+    }
+    let res_text = res.text().await?;
     let mut response_data: Value = serde_json::from_str(&res_text).map_err(|e| Error {
       kind: ErrorKind::ModelServerError,
       message: Some("Failed to parse model server response".to_string()),
@@ -328,25 +343,14 @@ impl ChatClient {
     }
 
     let stream = stream! {
+      let mut buffer = SseBuffer::new();
       let mut reach_done = false;
       while !reach_done {
         let Some(chunk_data) = res.chunk().await? else {
             break;
         };
-        let chunk_data_str = match String::from_utf8(chunk_data.to_vec()) {
-            Ok(v) => v,
-            Err(e) => {
-                yield Err(Error {
-                    kind: ErrorKind::ModelServerError,
-                    message: Some("Failed to decode model server response".to_string()),
-                    cause: Some(Box::new(e))
-                });
-                return;
-            }
-        };
-        let chunks = chunk_data_str.split("\n\n");
-        for chunk in chunks {
-          let delta = self.get_model_response_chunk(chunk);
+        for message in buffer.push(&chunk_data) {
+          let delta = self.get_model_response_chunk(&message);
           match delta {
             Some(ChatResponseChunk::Delta(d)) => {
               yield Ok(d);
@@ -358,22 +362,28 @@ impl ChatClient {
           }
         }
       }
+      for message in buffer.finish() {
+        if let Some(ChatResponseChunk::Delta(d)) = self.get_model_response_chunk(&message) {
+          yield Ok(d);
+        }
+      }
     };
     Ok(stream)
   }
 
   /**
-   * Parse the stream data from the stream chat completion API to obtain a chunk delta.
+   * Parse one complete SSE message (payload between blank lines) from the stream
+   * chat completion API to obtain a chunk delta.
    */
-  fn get_model_response_chunk(&self, data_str: &str) -> Option<ChatResponseChunk> {
-    if !data_str.starts_with("data: ") {
-      return None;
-    }
-    if data_str.starts_with("data: [DONE]") {
+  fn get_model_response_chunk(&self, message: &str) -> Option<ChatResponseChunk> {
+    let data_str = message
+      .lines()
+      .find_map(|line| line.strip_prefix("data:"))
+      .map(str::trim)?;
+    if data_str == "[DONE]" {
       return Some(ChatResponseChunk::Done);
     }
-    let trim_data = data_str.strip_prefix("data: ").unwrap().trim();
-    let chunk_value: Value = match serde_json::from_str(trim_data) {
+    let chunk_value: Value = match serde_json::from_str(data_str) {
       Ok(v) => v,
       Err(_) => return None,
     };

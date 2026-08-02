@@ -92,7 +92,7 @@ pub struct ChatMessage {
   pub content: ChatMessageContentValue,
 
   /** Reasoning content in string */
-  #[serde(rename = "reasoningContent", skip_serializing_if = "Option::is_none")]
+  #[serde(rename = "reasoning_content", skip_serializing_if = "Option::is_none")]
   pub reasoning_content: Option<String>,
   /**
    * Which tool call this message is responding to.

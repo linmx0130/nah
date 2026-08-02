@@ -4,6 +4,12 @@ CHANGELOG of nah_chat
 * Add OpenAI Responses API support: `responses()`, `responses_stream()`, `create_responses_request()`,
   `ResponsesInput`, `ResponseInputItem`, `ResponseOutputItem`, `ResponseObject`, `ResponseUsage`,
   `ResponsesStreamEvent`, `ResponsesParamsBuilder`.
+* Fix stream event loss in `chat_completion_stream` when SSE events are split across network chunks
+  (buffered SSE parsing; previously up to 60% of deltas could be dropped with typical chunk sizes).
+* Fix non-stream `chat_completion` dropping `reasoning_content` (the JSON field was serialized as
+  `reasoningContent`; it is now `reasoning_content`, matching DeepSeek/Qwen etc.).
+* Return the server HTTP error body from non-stream `chat_completion` on 4xx/5xx responses
+  instead of a misleading "missing choices field" parse error.
 * Fix infinite loop in `chat_completion_stream` when the server closes the connection without sending `data: [DONE]`.
 
 ## v0.5.0

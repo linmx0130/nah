@@ -200,3 +200,88 @@ fn test_responses_request_body() {
   assert_eq!(body["instructions"], "You are helpful.");
   assert_eq!(body["reasoning"]["effort"], "high");
 }
+
+#[test]
+fn test_chat_stream_chunk_split_reassembly() {
+  // SSE events split across network chunks must not be lost.
+  use crate::responses::SseBuffer;
+  let client = ChatClient::init("http://localhost".to_string(), None);
+  let delta1 = r#"{"choices":[{"delta":{"role":"assistant","content":"Hello"}}]}"#;
+  let delta2 = r#"{"choices":[{"delta":{"content":" world"}}]}"#;
+  let fixture = format!("data: {}\n\ndata: {}\n\ndata: [DONE]\n", delta1, delta2);
+
+  let mut buffer = SseBuffer::new();
+  let mut deltas: Vec<String> = Vec::new();
+  let mut done = false;
+
+  // Cut the first delta payload in half; the boundary falls inside an event.
+  let split_at = fixture.find("Hello").unwrap();
+  for message in buffer.push(&fixture.as_bytes()[..split_at]) {
+    match client.get_model_response_chunk(&message) {
+      Some(ChatResponseChunk::Delta(d)) => {
+        if let Some(content) = d.content {
+          deltas.push(content);
+        }
+      }
+      Some(ChatResponseChunk::Done) => done = true,
+      None => {}
+    }
+  }
+  assert!(
+    deltas.is_empty(),
+    "no complete event should be emitted before the split point"
+  );
+
+  for message in buffer.push(&fixture.as_bytes()[split_at..]) {
+    match client.get_model_response_chunk(&message) {
+      Some(ChatResponseChunk::Delta(d)) => {
+        if let Some(content) = d.content {
+          deltas.push(content);
+        }
+      }
+      Some(ChatResponseChunk::Done) => done = true,
+      None => {}
+    }
+  }
+  for message in buffer.finish() {
+    match client.get_model_response_chunk(&message) {
+      Some(ChatResponseChunk::Delta(d)) => {
+        if let Some(content) = d.content {
+          deltas.push(content);
+        }
+      }
+      Some(ChatResponseChunk::Done) => done = true,
+      None => {}
+    }
+  }
+
+  assert_eq!(deltas, vec!["Hello".to_string(), " world".to_string()]);
+  assert!(done, "the [DONE] marker must be detected");
+}
+
+#[test]
+fn test_deserialize_reasoning_content_snake_case() {
+  // DeepSeek (and most OpenAI-compatible providers) send `reasoning_content`.
+  let data = r#"{
+      "role": "assistant",
+      "content": "Hi",
+      "reasoning_content": "think a bit"
+    }
+    "#;
+  let message: ChatMessage = serde_json::from_str(data).unwrap();
+  assert_eq!(message.reasoning_content.as_deref(), Some("think a bit"));
+}
+
+#[test]
+fn test_serialize_reasoning_content_snake_case() {
+  let message = ChatMessage {
+    role: "assistant".to_owned(),
+    content: ChatMessageContentValue::Text("Hi".to_owned()),
+    reasoning_content: Some("think".to_owned()),
+    tool_call_id: None,
+    tool_calls: None,
+  };
+  let value = serde_json::to_value(&message).unwrap();
+  assert_eq!(value["reasoning_content"], "think");
+  assert!(value.get("reasoningContent").is_none());
+}
