@@ -329,7 +329,7 @@ impl ChatClient {
       let mut reach_done = false;
       while !reach_done {
         let Some(chunk_data) = res.chunk().await? else {
-            continue;
+            break;
         };
         let chunk_data_str = match String::from_utf8(chunk_data.to_vec()) {
             Ok(v) => v,
