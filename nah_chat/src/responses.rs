@@ -4,7 +4,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Number, Value};
+use serde_json::{Number, Value, json};
 
 // ---------- Input ----------
 
@@ -389,9 +389,432 @@ impl<'a> std::iter::IntoIterator for &'a ResponsesParamsBuilder {
   }
 }
 
+// ---------- Stream events ----------
+
+/**
+ * A parsed event from the Responses API streaming interface.
+ */
+#[derive(Debug, Clone)]
+pub enum ResponsesStreamEvent {
+  OutputTextDelta {
+    item_id: String,
+    output_index: usize,
+    content_index: usize,
+    delta: String,
+  },
+  OutputTextDone {
+    item_id: String,
+    output_index: usize,
+    content_index: usize,
+    text: String,
+  },
+  ReasoningTextDelta {
+    item_id: String,
+    output_index: usize,
+    content_index: usize,
+    delta: String,
+  },
+  ReasoningTextDone {
+    item_id: String,
+    output_index: usize,
+    content_index: usize,
+    text: String,
+  },
+  FunctionCallArgumentsDelta {
+    item_id: String,
+    output_index: usize,
+    delta: String,
+  },
+  FunctionCallArgumentsDone {
+    item_id: String,
+    output_index: usize,
+    arguments: String,
+  },
+  OutputItemDone {
+    output_index: usize,
+    item: ResponseOutputItem,
+  },
+  /** The response finished successfully; carries the full response object. */
+  Completed(ResponseObject),
+  /** The response was truncated (e.g. max_output_tokens reached). */
+  Incomplete(ResponseObject),
+  /** The response failed; `response.error` carries the error details. */
+  Failed(ResponseObject),
+  /** Any event type not explicitly modeled. */
+  Unknown { event_type: String, data: Value },
+}
+
+impl ResponsesStreamEvent {
+  fn is_terminal(&self) -> bool {
+    matches!(
+      self,
+      ResponsesStreamEvent::Completed(_)
+        | ResponsesStreamEvent::Incomplete(_)
+        | ResponsesStreamEvent::Failed(_)
+    )
+  }
+}
+
+// ---------- SSE parsing ----------
+
+/**
+ * Incremental SSE parser. Buffers partial messages so events split across
+ * network chunks are reassembled correctly.
+ */
+pub(crate) struct SseBuffer {
+  pending: String,
+}
+
+impl SseBuffer {
+  pub(crate) fn new() -> Self {
+    SseBuffer {
+      pending: String::new(),
+    }
+  }
+
+  /** Feed bytes; returns all complete SSE messages (payloads between blank lines). */
+  pub(crate) fn push(&mut self, bytes: &[u8]) -> Vec<String> {
+    let text = String::from_utf8_lossy(bytes);
+    self.pending.push_str(&text.replace("\r\n", "\n"));
+    let mut messages = Vec::new();
+    while let Some(idx) = self.pending.find("\n\n") {
+      let message = self.pending[..idx].trim_end_matches('\n').to_string();
+      self.pending.drain(..idx + 2);
+      messages.push(message);
+    }
+    messages
+  }
+
+  /** Flush any trailing message left at EOF. */
+  pub(crate) fn finish(&mut self) -> Vec<String> {
+    let rest = std::mem::take(&mut self.pending);
+    let trimmed = rest.trim();
+    if trimmed.is_empty() {
+      Vec::new()
+    } else {
+      vec![trimmed.to_string()]
+    }
+  }
+}
+
+/**
+ * Parse one SSE message into `(event_name, data_payload)`.
+ * Comment/heartbeat lines (`: ...`) are ignored.
+ */
+fn parse_sse_message(message: &str) -> Option<(Option<String>, String)> {
+  let mut event: Option<String> = None;
+  let mut data_lines: Vec<&str> = Vec::new();
+  for line in message.split('\n') {
+    if line.starts_with(':') {
+      continue;
+    }
+    if let Some(v) = line.strip_prefix("event:") {
+      event = Some(v.trim().to_string());
+    } else if let Some(v) = line.strip_prefix("data:") {
+      data_lines.push(v.trim());
+    }
+  }
+  if data_lines.is_empty() {
+    return None;
+  }
+  Some((event, data_lines.join("\n")))
+}
+
+/**
+ * Dispatch one SSE data payload to a typed event.
+ * Prefers the `type` field of the JSON payload; falls back to the SSE `event:` name.
+ * Unparseable or empty payloads are skipped.
+ */
+fn parse_responses_event(event_name: Option<&str>, data: &str) -> Option<ResponsesStreamEvent> {
+  if data == "[DONE]" {
+    return None; // defensive: not used by the Responses API
+  }
+  let value: Value = serde_json::from_str(data).ok()?;
+  let obj = value.as_object()?;
+  let type_name = obj.get("type").and_then(|t| t.as_str()).or(event_name)?;
+
+  let str_field = |obj: &serde_json::Map<String, Value>, key: &str| -> String {
+    obj
+      .get(key)
+      .and_then(|v| v.as_str())
+      .unwrap_or("")
+      .to_string()
+  };
+  let num_field = |obj: &serde_json::Map<String, Value>, key: &str| -> usize {
+    obj.get(key).and_then(|v| v.as_u64()).unwrap_or(0) as usize
+  };
+
+  match type_name {
+    "response.output_text.delta" => Some(ResponsesStreamEvent::OutputTextDelta {
+      item_id: str_field(obj, "item_id"),
+      output_index: num_field(obj, "output_index"),
+      content_index: num_field(obj, "content_index"),
+      delta: str_field(obj, "delta"),
+    }),
+    "response.output_text.done" => Some(ResponsesStreamEvent::OutputTextDone {
+      item_id: str_field(obj, "item_id"),
+      output_index: num_field(obj, "output_index"),
+      content_index: num_field(obj, "content_index"),
+      text: str_field(obj, "text"),
+    }),
+    "response.reasoning_text.delta" => Some(ResponsesStreamEvent::ReasoningTextDelta {
+      item_id: str_field(obj, "item_id"),
+      output_index: num_field(obj, "output_index"),
+      content_index: num_field(obj, "content_index"),
+      delta: str_field(obj, "delta"),
+    }),
+    "response.reasoning_text.done" => Some(ResponsesStreamEvent::ReasoningTextDone {
+      item_id: str_field(obj, "item_id"),
+      output_index: num_field(obj, "output_index"),
+      content_index: num_field(obj, "content_index"),
+      text: str_field(obj, "text"),
+    }),
+    "response.function_call_arguments.delta" => {
+      Some(ResponsesStreamEvent::FunctionCallArgumentsDelta {
+        item_id: str_field(obj, "item_id"),
+        output_index: num_field(obj, "output_index"),
+        delta: str_field(obj, "delta"),
+      })
+    }
+    "response.function_call_arguments.done" => {
+      Some(ResponsesStreamEvent::FunctionCallArgumentsDone {
+        item_id: str_field(obj, "item_id"),
+        output_index: num_field(obj, "output_index"),
+        arguments: str_field(obj, "arguments"),
+      })
+    }
+    "response.output_item.done" => {
+      let item: ResponseOutputItem = serde_json::from_value(obj.get("item")?.clone()).ok()?;
+      Some(ResponsesStreamEvent::OutputItemDone {
+        output_index: num_field(obj, "output_index"),
+        item,
+      })
+    }
+    "response.completed" => Some(ResponsesStreamEvent::Completed(parse_embedded_response(
+      obj,
+    )?)),
+    "response.incomplete" => Some(ResponsesStreamEvent::Incomplete(parse_embedded_response(
+      obj,
+    )?)),
+    "response.failed" => Some(ResponsesStreamEvent::Failed(parse_embedded_response(obj)?)),
+    other => Some(ResponsesStreamEvent::Unknown {
+      event_type: other.to_string(),
+      data: value,
+    }),
+  }
+}
+
+fn parse_embedded_response(obj: &serde_json::Map<String, Value>) -> Option<ResponseObject> {
+  let response_value = obj.get("response")?;
+  serde_json::from_value(response_value.clone()).ok()
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  const STREAM_FIXTURE_TEXT: &str = "\
+event: response.output_text.delta
+data: {\"type\":\"response.output_text.delta\",\"sequence_number\":4,\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"Hello\"}
+
+event: response.output_text.delta
+data: {\"type\":\"response.output_text.delta\",\"sequence_number\":5,\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\" world\"}
+
+event: response.output_text.done
+data: {\"type\":\"response.output_text.done\",\"sequence_number\":6,\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"text\":\"Hello world\",\"annotations\":[]}
+
+event: response.output_item.done
+data: {\"type\":\"response.output_item.done\",\"sequence_number\":7,\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Hello world\",\"annotations\":[]}]}}
+
+event: response.completed
+data: {\"type\":\"response.completed\",\"sequence_number\":8,\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"created_at\":1754000000,\"status\":\"completed\",\"model\":\"deepseek-v4-flash\",\"output\":[{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Hello world\",\"annotations\":[]}]}],\"usage\":{\"input_tokens\":12,\"output_tokens\":3,\"total_tokens\":15,\"input_tokens_details\":{\"cached_tokens\":0},\"output_tokens_details\":{\"reasoning_tokens\":0}}}}
+";
+
+  fn parse_fixture(fixture: &str) -> Vec<ResponsesStreamEvent> {
+    let mut buffer = SseBuffer::new();
+    let mut events = Vec::new();
+    for message in buffer.push(fixture.as_bytes()) {
+      if let Some((name, data)) = parse_sse_message(&message) {
+        if let Some(event) = parse_responses_event(name.as_deref(), &data) {
+          events.push(event);
+        }
+      }
+    }
+    for message in buffer.finish() {
+      if let Some((name, data)) = parse_sse_message(&message) {
+        if let Some(event) = parse_responses_event(name.as_deref(), &data) {
+          events.push(event);
+        }
+      }
+    }
+    events
+  }
+
+  fn typed_events(events: Vec<ResponsesStreamEvent>) -> Vec<ResponsesStreamEvent> {
+    events
+      .into_iter()
+      .filter(|e| !matches!(e, ResponsesStreamEvent::Unknown { .. }))
+      .collect()
+  }
+
+  #[test]
+  fn test_parse_simple_stream() {
+    let events = typed_events(parse_fixture(STREAM_FIXTURE_TEXT));
+    assert_eq!(events.len(), 5); // delta, delta, done, item.done, completed
+  }
+
+  #[test]
+  fn test_stream_event_shapes() {
+    let events = typed_events(parse_fixture(STREAM_FIXTURE_TEXT));
+    match &events[0] {
+      ResponsesStreamEvent::OutputTextDelta {
+        delta,
+        output_index,
+        ..
+      } => {
+        assert_eq!(delta, "Hello");
+        assert_eq!(*output_index, 0);
+      }
+      _ => panic!("expected OutputTextDelta"),
+    }
+    match &events[1] {
+      ResponsesStreamEvent::OutputTextDelta { delta, .. } => assert_eq!(delta, " world"),
+      _ => panic!("expected OutputTextDelta"),
+    }
+    match &events[2] {
+      ResponsesStreamEvent::OutputTextDone { text, .. } => assert_eq!(text, "Hello world"),
+      _ => panic!("expected OutputTextDone"),
+    }
+    match &events[3] {
+      ResponsesStreamEvent::OutputItemDone { item, .. } => assert!(item.is_message()),
+      _ => panic!("expected OutputItemDone"),
+    }
+    match &events[4] {
+      ResponsesStreamEvent::Completed(response) => {
+        assert_eq!(response.status, "completed");
+        assert_eq!(response.output_text(), "Hello world");
+        assert_eq!(response.usage.as_ref().unwrap().total_tokens, Some(15));
+        assert_eq!(response.output.len(), 1);
+      }
+      _ => panic!("expected Completed"),
+    }
+  }
+
+  #[test]
+  fn test_parse_reasoning_and_function_call_events() {
+    let fixture = "\
+event: response.reasoning_text.delta
+data: {\"type\":\"response.reasoning_text.delta\",\"sequence_number\":3,\"item_id\":\"rs_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"Let me think\"}
+
+event: response.reasoning_text.done
+data: {\"type\":\"response.reasoning_text.done\",\"sequence_number\":4,\"item_id\":\"rs_1\",\"output_index\":0,\"content_index\":0,\"text\":\"Let me think step by step\"}
+
+event: response.function_call_arguments.delta
+data: {\"type\":\"response.function_call_arguments.delta\",\"sequence_number\":11,\"item_id\":\"fc_1\",\"output_index\":0,\"delta\":\"{\\\"city\\\":\"}
+
+event: response.function_call_arguments.delta
+data: {\"type\":\"response.function_call_arguments.delta\",\"sequence_number\":12,\"item_id\":\"fc_1\",\"output_index\":0,\"delta\":\"\\\"SF\\\"}\"}
+
+event: response.function_call_arguments.done
+data: {\"type\":\"response.function_call_arguments.done\",\"sequence_number\":13,\"item_id\":\"fc_1\",\"output_index\":0,\"arguments\":\"{\\\"city\\\":\\\"SF\\\"}\"}
+";
+    let events = parse_fixture(fixture);
+    assert_eq!(events.len(), 5);
+    match &events[0] {
+      ResponsesStreamEvent::ReasoningTextDelta { delta, .. } => assert_eq!(delta, "Let me think"),
+      _ => panic!("expected ReasoningTextDelta"),
+    }
+    match &events[1] {
+      ResponsesStreamEvent::ReasoningTextDone { text, .. } => {
+        assert_eq!(text, "Let me think step by step")
+      }
+      _ => panic!("expected ReasoningTextDone"),
+    }
+    match &events[2] {
+      ResponsesStreamEvent::FunctionCallArgumentsDelta { delta, .. } => {
+        assert_eq!(delta, "{\"city\":")
+      }
+      _ => panic!("expected FunctionCallArgumentsDelta"),
+    }
+    match &events[3] {
+      ResponsesStreamEvent::FunctionCallArgumentsDelta { delta, .. } => {
+        assert_eq!(delta, "\"SF\"}")
+      }
+      _ => panic!("expected FunctionCallArgumentsDelta"),
+    }
+    match &events[4] {
+      ResponsesStreamEvent::FunctionCallArgumentsDone { arguments, .. } => {
+        assert_eq!(arguments, "{\"city\":\"SF\"}")
+      }
+      _ => panic!("expected FunctionCallArgumentsDone"),
+    }
+  }
+
+  #[test]
+  fn test_sse_chunk_split_reassembly() {
+    let fixture = STREAM_FIXTURE_TEXT;
+    let split_at = fixture.find("Hello").unwrap(); // cut mid-event
+    let mut buffer = SseBuffer::new();
+    let mut events = Vec::new();
+    for message in buffer.push(fixture[..split_at].as_bytes()) {
+      if let Some((name, data)) = parse_sse_message(&message) {
+        if let Some(event) = parse_responses_event(name.as_deref(), &data) {
+          events.push(event);
+        }
+      }
+    }
+    assert!(
+      events.is_empty(),
+      "no complete event should be emitted before the split point"
+    );
+    for message in buffer.push(fixture[split_at..].as_bytes()) {
+      if let Some((name, data)) = parse_sse_message(&message) {
+        if let Some(event) = parse_responses_event(name.as_deref(), &data) {
+          events.push(event);
+        }
+      }
+    }
+    for message in buffer.finish() {
+      if let Some((name, data)) = parse_sse_message(&message) {
+        if let Some(event) = parse_responses_event(name.as_deref(), &data) {
+          events.push(event);
+        }
+      }
+    }
+    assert_eq!(events.len(), 5);
+  }
+
+  #[test]
+  fn test_unknown_event_and_heartbeat_are_handled() {
+    let fixture = "\
+: ping
+
+event: response.whatever.custom
+data: {\"type\":\"response.whatever.custom\",\"sequence_number\":1,\"foo\":\"bar\"}
+
+event: response.output_text.delta
+data: {\"type\":\"response.output_text.delta\",\"sequence_number\":2,\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"X\"}
+";
+    let events = parse_fixture(fixture);
+    assert_eq!(events.len(), 2);
+    match &events[0] {
+      ResponsesStreamEvent::Unknown { event_type, .. } => {
+        assert_eq!(event_type, "response.whatever.custom")
+      }
+      _ => panic!("expected Unknown passthrough"),
+    }
+    match &events[1] {
+      ResponsesStreamEvent::OutputTextDelta { delta, .. } => assert_eq!(delta, "X"),
+      _ => panic!("expected OutputTextDelta"),
+    }
+  }
+
+  #[test]
+  fn test_terminal_events_are_terminal() {
+    let events = typed_events(parse_fixture(STREAM_FIXTURE_TEXT));
+    assert!(!events[0].is_terminal());
+    assert!(events[4].is_terminal()); // Completed
+  }
 
   #[test]
   fn test_responses_params_builder() {
