@@ -725,21 +725,21 @@ impl ChatClient {
           break;
         };
         for message in buffer.push(&chunk_data) {
-          if let Some((event_name, data)) = parse_sse_message(&message) {
-            if let Some(event) = parse_responses_event(event_name.as_deref(), &data) {
-              if event.is_terminal() {
-                finished = true;
-              }
-              yield Ok(event);
+          if let Some((event_name, data)) = parse_sse_message(&message)
+            && let Some(event) = parse_responses_event(event_name.as_deref(), &data)
+          {
+            if event.is_terminal() {
+              finished = true;
             }
+            yield Ok(event);
           }
         }
       }
       for message in buffer.finish() {
-        if let Some((event_name, data)) = parse_sse_message(&message) {
-          if let Some(event) = parse_responses_event(event_name.as_deref(), &data) {
-            yield Ok(event);
-          }
+        if let Some((event_name, data)) = parse_sse_message(&message)
+          && let Some(event) = parse_responses_event(event_name.as_deref(), &data)
+        {
+          yield Ok(event);
         }
       }
     };
@@ -783,17 +783,17 @@ data: {\"type\":\"response.completed\",\"sequence_number\":8,\"response\":{\"id\
     let mut buffer = SseBuffer::new();
     let mut events = Vec::new();
     for message in buffer.push(fixture.as_bytes()) {
-      if let Some((name, data)) = parse_sse_message(&message) {
-        if let Some(event) = parse_responses_event(name.as_deref(), &data) {
-          events.push(event);
-        }
+      if let Some((name, data)) = parse_sse_message(&message)
+        && let Some(event) = parse_responses_event(name.as_deref(), &data)
+      {
+        events.push(event);
       }
     }
     for message in buffer.finish() {
-      if let Some((name, data)) = parse_sse_message(&message) {
-        if let Some(event) = parse_responses_event(name.as_deref(), &data) {
-          events.push(event);
-        }
+      if let Some((name, data)) = parse_sse_message(&message)
+        && let Some(event) = parse_responses_event(name.as_deref(), &data)
+      {
+        events.push(event);
       }
     }
     events
@@ -905,29 +905,29 @@ data: {\"type\":\"response.function_call_arguments.done\",\"sequence_number\":13
     let split_at = fixture.find("Hello").unwrap(); // cut mid-event
     let mut buffer = SseBuffer::new();
     let mut events = Vec::new();
-    for message in buffer.push(fixture[..split_at].as_bytes()) {
-      if let Some((name, data)) = parse_sse_message(&message) {
-        if let Some(event) = parse_responses_event(name.as_deref(), &data) {
-          events.push(event);
-        }
+    for message in buffer.push(&fixture.as_bytes()[..split_at]) {
+      if let Some((name, data)) = parse_sse_message(&message)
+        && let Some(event) = parse_responses_event(name.as_deref(), &data)
+      {
+        events.push(event);
       }
     }
     assert!(
       events.is_empty(),
       "no complete event should be emitted before the split point"
     );
-    for message in buffer.push(fixture[split_at..].as_bytes()) {
-      if let Some((name, data)) = parse_sse_message(&message) {
-        if let Some(event) = parse_responses_event(name.as_deref(), &data) {
-          events.push(event);
-        }
+    for message in buffer.push(&fixture.as_bytes()[split_at..]) {
+      if let Some((name, data)) = parse_sse_message(&message)
+        && let Some(event) = parse_responses_event(name.as_deref(), &data)
+      {
+        events.push(event);
       }
     }
     for message in buffer.finish() {
-      if let Some((name, data)) = parse_sse_message(&message) {
-        if let Some(event) = parse_responses_event(name.as_deref(), &data) {
-          events.push(event);
-        }
+      if let Some((name, data)) = parse_sse_message(&message)
+        && let Some(event) = parse_responses_event(name.as_deref(), &data)
+      {
+        events.push(event);
       }
     }
     assert_eq!(events.len(), 5);
