@@ -1,11 +1,13 @@
 # Introduction
 This crate exposes an async stream API for the widely-used OpenAI
-[chat completion API](https://platform.openai.com/docs/api-reference/chat).
+[chat completion API](https://platform.openai.com/docs/api-reference/chat) and the
+[Responses API](https://platform.openai.com/docs/api-reference/responses).
 
 Supported features:
 * Stream generation
 * Tool calls
 * Reasoning content (Qwen3, Deepseek R1, etc)
+* Responses API (stream + non-stream, tool calls, reasoning)
 This crate is built on top of `reqwest` and `serde_json`.
 
 ```rust
@@ -36,6 +38,17 @@ while let Some(delta_result) = stream.next().await {
   }
 }
 ```
+
+## Responses API
+
+The [Responses API](https://platform.openai.com/docs/api-reference/responses) is supported via
+`responses()` (non-stream) and `responses_stream()` (SSE event stream). The endpoint is
+`{base_url}/responses` — for DeepSeek use `https://api.deepseek.com`, for OpenAI use
+`https://api.openai.com/v1` (the base URL must not end with `/`).
+
+The stream yields typed `ResponsesStreamEvent`s and terminates on `response.completed` /
+`response.incomplete` / `response.failed` (no `data: [DONE]`). See `examples/responses.rs`
+and `examples/responses_tool.rs` for runnable examples.
 
 # Notice
 Copyright 2025, [Mengxiao Lin](linmx0130@gmail.com).

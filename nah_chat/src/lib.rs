@@ -7,12 +7,14 @@
 //!
 //! # Introduction
 //! This crate exposes an async stream API for the widely-used OpenAI
-//! [chat completion API](https://platform.openai.com/docs/api-reference/chat).
+//! [chat completion API](https://platform.openai.com/docs/api-reference/chat) and the
+//! [Responses API](https://platform.openai.com/docs/api-reference/responses).
 //!
 //! Supported features:
 //! * Stream generation
 //! * Tool calls
 //! * Reasoning content (Qwen3, Deepseek R1, etc)
+//! * Responses API (stream + non-stream, tool calls, reasoning)
 //!
 //! This crate is built on top of `tokio`, `reqwest` and `serde_json`.
 //!

@@ -1,5 +1,11 @@
 CHANGELOG of nah_chat
 ===
+## v0.7.0
+* Add OpenAI Responses API support: `responses()`, `responses_stream()`, `create_responses_request()`,
+  `ResponsesInput`, `ResponseInputItem`, `ResponseOutputItem`, `ResponseObject`, `ResponseUsage`,
+  `ResponsesStreamEvent`, `ResponsesParamsBuilder`.
+* Fix infinite loop in `chat_completion_stream` when the server closes the connection without sending `data: [DONE]`.
+
 ## v0.5.0
 * Fix `max_tokens` parameter name
 * Implement `FromIterator`, `Default` and `Extend` for `ChatMessage`.
