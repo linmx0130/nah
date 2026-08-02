@@ -4,7 +4,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Number, Value};
 
 // ---------- Input ----------
 
@@ -274,9 +274,146 @@ pub struct ResponseOutputTokensDetails {
   pub reasoning_tokens: Option<u64>,
 }
 
+// ---------- Params builder ----------
+
+/**
+ * A builder for creating parameters of Responses API requests.
+ */
+#[derive(Debug, Clone)]
+pub struct ResponsesParamsBuilder {
+  data: std::collections::HashMap<String, Value>,
+}
+
+impl ResponsesParamsBuilder {
+  /**
+   * Initialize a [ResponsesParamsBuilder] object.
+   */
+  pub fn new() -> Self {
+    ResponsesParamsBuilder {
+      data: std::collections::HashMap::new(),
+    }
+  }
+
+  /**
+   * Consume the data builder to get a hash map of the parameters for Responses API requests.
+   */
+  pub fn build(self) -> std::collections::HashMap<String, Value> {
+    self.data
+  }
+
+  /** Set the `instructions` parameter (inserted as the first system message). */
+  pub fn instructions(&mut self, s: &str) -> &mut Self {
+    self
+      .data
+      .insert("instructions".to_owned(), json!(s.to_owned()));
+    self
+  }
+
+  /** Set the `max_output_tokens` parameter. */
+  pub fn max_output_tokens(&mut self, n: usize) -> &mut Self {
+    self.data.insert(
+      "max_output_tokens".to_owned(),
+      Value::Number(Number::from_u128(n as u128).unwrap()),
+    );
+    self
+  }
+
+  /** Set the `temperature` parameter. */
+  pub fn temperature(&mut self, t: f64) -> &mut Self {
+    self.data.insert(
+      "temperature".to_owned(),
+      Value::Number(Number::from_f64(t).unwrap()),
+    );
+    self
+  }
+
+  /** Set the `top_p` parameter. */
+  pub fn top_p(&mut self, p: f64) -> &mut Self {
+    self.data.insert(
+      "top_p".to_owned(),
+      Value::Number(Number::from_f64(p).unwrap()),
+    );
+    self
+  }
+
+  /** Set the `top_logprobs` parameter (range [0, 20] on DeepSeek). */
+  pub fn top_logprobs(&mut self, n: usize) -> &mut Self {
+    self.data.insert(
+      "top_logprobs".to_owned(),
+      Value::Number(Number::from_u128(n as u128).unwrap()),
+    );
+    self
+  }
+
+  /**
+   * Set the `tools` parameter. Note: the Responses API tool format is FLAT —
+   * `{"type":"function","name":...,"description":...,"parameters":...}` —
+   * unlike the nested `{"function":{...}}` shape of the chat completion API.
+   */
+  pub fn tools(&mut self, tools: Value) -> &mut Self {
+    self.data.insert("tools".to_owned(), tools);
+    self
+  }
+
+  /** Set the `tool_choice` parameter: "none" / "auto" / "required" / {"type":"function","name":...}. */
+  pub fn tool_choice(&mut self, choice: Value) -> &mut Self {
+    self.data.insert("tool_choice".to_owned(), choice);
+    self
+  }
+
+  /** Set the `reasoning` parameter, e.g. `json!({"effort": "high"})`. */
+  pub fn reasoning(&mut self, reasoning: Value) -> &mut Self {
+    self.data.insert("reasoning".to_owned(), reasoning);
+    self
+  }
+
+  /** Set the `text` parameter, e.g. `json!({"format": {"type": "json_object"}})`. */
+  pub fn text(&mut self, text: Value) -> &mut Self {
+    self.data.insert("text".to_owned(), text);
+    self
+  }
+
+  /** Insert an arbitrary parameter with key `name` and value `value`. */
+  pub fn insert(&mut self, name: &str, value: Value) -> &mut Self {
+    self.data.insert(name.to_owned(), value);
+    self
+  }
+}
+
+impl<'a> std::iter::IntoIterator for &'a ResponsesParamsBuilder {
+  type Item = (&'a String, &'a Value);
+  type IntoIter = std::collections::hash_map::Iter<'a, String, Value>;
+
+  fn into_iter(self) -> Self::IntoIter {
+    (&self.data).into_iter()
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn test_responses_params_builder() {
+    let mut params = ResponsesParamsBuilder::new();
+    params
+      .instructions("You are helpful.")
+      .max_output_tokens(2048)
+      .temperature(0.7)
+      .top_p(0.9)
+      .top_logprobs(5)
+      .reasoning(serde_json::json!({"effort": "high"}))
+      .insert("customized_key", serde_json::json!("customized_value"));
+    let data = params.build();
+    assert_eq!(data["instructions"], "You are helpful.");
+    assert_eq!(data["max_output_tokens"], 2048);
+    assert_eq!(data["temperature"], 0.7);
+    assert_eq!(data["top_p"], 0.9);
+    assert_eq!(data["top_logprobs"], 5);
+    assert_eq!(data["reasoning"]["effort"], "high");
+    assert_eq!(data["customized_key"], "customized_value");
+    assert_eq!(data.len(), 7);
+  }
 
   #[test]
   fn test_serialize_input_text() {
