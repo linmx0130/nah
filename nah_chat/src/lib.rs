@@ -59,8 +59,10 @@
 //!
 mod error;
 mod message;
+mod responses;
 pub use error::{Error, ErrorKind, Result};
 pub use message::*;
+pub use responses::*;
 
 use async_stream::stream;
 use futures_core::stream::Stream;
