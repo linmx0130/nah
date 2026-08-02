@@ -174,3 +174,29 @@ fn test_deserialize_image_url() {
     }])
   );
 }
+
+#[test]
+fn test_responses_request_body() {
+  use crate::responses::{ResponsesInput, ResponsesParamsBuilder};
+  let client = ChatClient::init(
+    "https://api.deepseek.com".to_string(),
+    Some("k".to_string()),
+  );
+  let mut params = ResponsesParamsBuilder::new();
+  params
+    .instructions("You are helpful.")
+    .reasoning(serde_json::json!({"effort": "high"}));
+  let input = ResponsesInput::Text("Hi".to_string());
+  let req = client
+    .create_responses_request("deepseek-v4-flash", &input, true, &params)
+    .build()
+    .unwrap();
+  assert_eq!(req.url().path(), "/responses");
+  let body: serde_json::Value =
+    serde_json::from_slice(req.body().unwrap().as_bytes().unwrap()).unwrap();
+  assert_eq!(body["model"], "deepseek-v4-flash");
+  assert_eq!(body["input"], "Hi");
+  assert_eq!(body["stream"], true);
+  assert_eq!(body["instructions"], "You are helpful.");
+  assert_eq!(body["reasoning"]["effort"], "high");
+}

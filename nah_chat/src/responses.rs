@@ -3,8 +3,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
+use async_stream::stream;
+use futures_core::stream::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value, json};
+
+use crate::{ChatClient, Error, ErrorKind, Result};
 
 // ---------- Input ----------
 
@@ -607,6 +611,151 @@ fn parse_responses_event(event_name: Option<&str>, data: &str) -> Option<Respons
 fn parse_embedded_response(obj: &serde_json::Map<String, Value>) -> Option<ResponseObject> {
   let response_value = obj.get("response")?;
   serde_json::from_value(response_value.clone()).ok()
+}
+
+// ---------- Client methods ----------
+
+impl ChatClient {
+  /**
+   * Create a Responses API request.
+   *
+   * Args:
+   * * `model` Name of the model to be called.
+   * * `input` The input of the request: a text string or a list of input items.
+   * * `is_stream` Whether the request is stream-based.
+   * * `params` Other parameters to be sent (see [ResponsesParamsBuilder]).
+   */
+  pub fn create_responses_request<'a, P>(
+    &self,
+    model: &str,
+    input: &ResponsesInput,
+    is_stream: bool,
+    params: P,
+  ) -> reqwest::RequestBuilder
+  where
+    P: IntoIterator<Item = (&'a String, &'a Value)>,
+  {
+    let mut data = json!({
+      "model": model.to_owned(),
+      "input": input,
+      "stream": is_stream,
+    });
+    params.into_iter().for_each(|(key, value)| {
+      data
+        .as_object_mut()
+        .and_then(|o| o.insert(key.to_owned(), value.to_owned()));
+    });
+
+    let endpoint = format!("{}/responses", self.base_url);
+
+    let mut req = self
+      .http_client
+      .post(&endpoint)
+      .header(reqwest::header::CONTENT_TYPE, "application/json")
+      .body(serde_json::to_string(&data).unwrap());
+    if self.auth_token.is_some() {
+      req = req.bearer_auth(self.auth_token.as_ref().unwrap().as_str());
+    }
+    req
+  }
+
+  /**
+   * Request a response in the non-stream approach.
+   *
+   * Args:
+   * * `model` Name of the model to be called.
+   * * `input` The input of the request: a text string or a list of input items.
+   * * `params` Other parameters to be sent (see [ResponsesParamsBuilder]).
+   */
+  pub async fn responses<'a, P>(
+    &self,
+    model: &str,
+    input: &ResponsesInput,
+    params: P,
+  ) -> Result<ResponseObject>
+  where
+    P: IntoIterator<Item = (&'a String, &'a Value)>,
+  {
+    let req = self.create_responses_request(model, input, false, params);
+    let res_text = req.send().await?.text().await?;
+    parse_response_object(&res_text)
+  }
+
+  /**
+   * Request a response in the async stream approach. The stream yields typed
+   * [ResponsesStreamEvent]s and terminates on `response.completed` /
+   * `response.incomplete` / `response.failed` (the Responses API does not use
+   * `data: [DONE]`).
+   *
+   * Args:
+   * * `model` Name of the model to be called.
+   * * `input` The input of the request: a text string or a list of input items.
+   * * `params` Other parameters to be sent (see [ResponsesParamsBuilder]).
+   */
+  pub async fn responses_stream<'a, P>(
+    &self,
+    model: &str,
+    input: &ResponsesInput,
+    params: P,
+  ) -> Result<impl Stream<Item = Result<ResponsesStreamEvent>>>
+  where
+    P: IntoIterator<Item = (&'a String, &'a Value)>,
+  {
+    let req = self.create_responses_request(model, input, true, params);
+    let mut res = req.send().await?;
+
+    if !res.status().is_success() {
+      let code = res.status().as_u16();
+      let error_content = res.text().await.unwrap();
+      return Err(Error {
+        kind: ErrorKind::ModelServerError,
+        message: Some(format!(
+          "Model server responded with error: HTTP status {}, error message = {}",
+          code, error_content
+        )),
+        cause: None,
+      });
+    }
+
+    let stream = stream! {
+      let mut buffer = SseBuffer::new();
+      let mut finished = false;
+      while !finished {
+        let Some(chunk_data) = res.chunk().await? else {
+          break;
+        };
+        for message in buffer.push(&chunk_data) {
+          if let Some((event_name, data)) = parse_sse_message(&message) {
+            if let Some(event) = parse_responses_event(event_name.as_deref(), &data) {
+              if event.is_terminal() {
+                finished = true;
+              }
+              yield Ok(event);
+            }
+          }
+        }
+      }
+      for message in buffer.finish() {
+        if let Some((event_name, data)) = parse_sse_message(&message) {
+          if let Some(event) = parse_responses_event(event_name.as_deref(), &data) {
+            yield Ok(event);
+          }
+        }
+      }
+    };
+    Ok(stream)
+  }
+}
+
+/**
+ * Parse the JSON body of a non-stream Responses API response.
+ */
+fn parse_response_object(text: &str) -> Result<ResponseObject> {
+  serde_json::from_str(text).map_err(|e| Error {
+    kind: ErrorKind::ModelServerError,
+    message: Some("Failed to parse model server response".to_string()),
+    cause: Some(Box::new(e)),
+  })
 }
 
 #[cfg(test)]
