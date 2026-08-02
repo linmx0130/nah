@@ -384,12 +384,18 @@ impl ResponsesParamsBuilder {
   }
 }
 
+impl Default for ResponsesParamsBuilder {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
 impl<'a> std::iter::IntoIterator for &'a ResponsesParamsBuilder {
   type Item = (&'a String, &'a Value);
   type IntoIter = std::collections::hash_map::Iter<'a, String, Value>;
 
   fn into_iter(self) -> Self::IntoIter {
-    (&self.data).into_iter()
+    self.data.iter()
   }
 }
 
@@ -476,10 +482,16 @@ impl SseBuffer {
     }
   }
 
-  /** Feed bytes; returns all complete SSE messages (payloads between blank lines). */
+  /**
+   * Feed bytes; returns all complete SSE messages (payloads between blank lines).
+   *
+   * CRLF line endings are normalized to LF on the whole accumulated buffer (not
+   * per-chunk), so a `\r\n` pair split across a chunk boundary is still joined.
+   */
   pub(crate) fn push(&mut self, bytes: &[u8]) -> Vec<String> {
     let text = String::from_utf8_lossy(bytes);
-    self.pending.push_str(&text.replace("\r\n", "\n"));
+    self.pending.push_str(&text);
+    self.pending = self.pending.replace("\r\n", "\n");
     let mut messages = Vec::new();
     while let Some(idx) = self.pending.find("\n\n") {
       let message = self.pending[..idx].trim_end_matches('\n').to_string();
@@ -653,8 +665,8 @@ impl ChatClient {
       .post(&endpoint)
       .header(reqwest::header::CONTENT_TYPE, "application/json")
       .body(serde_json::to_string(&data).unwrap());
-    if self.auth_token.is_some() {
-      req = req.bearer_auth(self.auth_token.as_ref().unwrap().as_str());
+    if let Some(token) = &self.auth_token {
+      req = req.bearer_auth(token.as_str());
     }
     req
   }
@@ -677,7 +689,20 @@ impl ChatClient {
     P: IntoIterator<Item = (&'a String, &'a Value)>,
   {
     let req = self.create_responses_request(model, input, false, params);
-    let res_text = req.send().await?.text().await?;
+    let res = req.send().await?;
+    if !res.status().is_success() {
+      let code = res.status().as_u16();
+      let error_content = res.text().await.unwrap();
+      return Err(Error {
+        kind: ErrorKind::ModelServerError,
+        message: Some(format!(
+          "Model server responded with error: HTTP status {}, error message = {}",
+          code, error_content
+        )),
+        cause: None,
+      });
+    }
+    let res_text = res.text().await?;
     parse_response_object(&res_text)
   }
 
@@ -963,6 +988,90 @@ data: {\"type\":\"response.output_text.delta\",\"sequence_number\":2,\"item_id\"
     let events = typed_events(parse_fixture(STREAM_FIXTURE_TEXT));
     assert!(!events[0].is_terminal());
     assert!(events[4].is_terminal()); // Completed
+  }
+
+  #[test]
+  fn test_crlf_split_across_chunk_boundary() {
+    // Event separator is \r\n\r\n; the chunk boundary falls between the \r and
+    // the \n of the second pair, so a single \r\n pair is split across chunks.
+    let event1 = "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"m\",\"output_index\":0,\"content_index\":0,\"delta\":\"CRLF\"}";
+    let event2 = "event: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":9,\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"created_at\":1754000000,\"status\":\"completed\",\"model\":\"deepseek-v4-flash\",\"output\":[],\"usage\":null}}";
+    let full = format!("{}\r\n\r\n{}", event1, event2);
+    let sep_idx = full.find("\r\n\r\n").unwrap();
+    let split_at = sep_idx + 3; // between the \r and the \n of the second pair
+
+    let mut buffer = SseBuffer::new();
+    let mut events = Vec::new();
+    for message in buffer.push(&full.as_bytes()[..split_at]) {
+      if let Some((name, data)) = parse_sse_message(&message)
+        && let Some(event) = parse_responses_event(name.as_deref(), &data)
+      {
+        events.push(event);
+      }
+    }
+    assert!(
+      events.is_empty(),
+      "no complete event should be emitted before the split point"
+    );
+    for message in buffer.push(&full.as_bytes()[split_at..]) {
+      if let Some((name, data)) = parse_sse_message(&message)
+        && let Some(event) = parse_responses_event(name.as_deref(), &data)
+      {
+        events.push(event);
+      }
+    }
+    for message in buffer.finish() {
+      if let Some((name, data)) = parse_sse_message(&message)
+        && let Some(event) = parse_responses_event(name.as_deref(), &data)
+      {
+        events.push(event);
+      }
+    }
+    assert_eq!(
+      events.len(),
+      2,
+      "both events must survive a CRLF boundary split"
+    );
+    match &events[0] {
+      ResponsesStreamEvent::OutputTextDelta { delta, .. } => assert_eq!(delta, "CRLF"),
+      _ => panic!("expected OutputTextDelta"),
+    }
+    assert!(events[1].is_terminal());
+  }
+
+  #[test]
+  fn test_event_line_fallback_without_type_field() {
+    // Payloads without a JSON `type` field must dispatch via the SSE `event:` line.
+    let fixture = "\
+event: response.output_text.delta
+data: {\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"fallback\"}
+
+event: response.whatever.custom
+data: {\"sequence_number\":1,\"foo\":\"bar\"}
+";
+    let events = parse_fixture(fixture);
+    assert_eq!(events.len(), 2);
+    match &events[0] {
+      ResponsesStreamEvent::OutputTextDelta { delta, .. } => assert_eq!(delta, "fallback"),
+      _ => panic!("expected OutputTextDelta via event-line fallback"),
+    }
+    match &events[1] {
+      ResponsesStreamEvent::Unknown { event_type, .. } => {
+        assert_eq!(event_type, "response.whatever.custom")
+      }
+      _ => panic!("expected Unknown via event-line name"),
+    }
+  }
+
+  #[test]
+  fn test_done_marker_is_skipped() {
+    // The Responses API does not use data: [DONE], but it must be tolerated.
+    let mut buffer = SseBuffer::new();
+    let messages = buffer.push(b"data: [DONE]\n\n");
+    assert_eq!(messages.len(), 1);
+    let (name, data) = parse_sse_message(&messages[0]).unwrap();
+    assert_eq!(data, "[DONE]");
+    assert!(parse_responses_event(name.as_deref(), &data).is_none());
   }
 
   #[test]
