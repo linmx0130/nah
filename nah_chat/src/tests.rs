@@ -87,14 +87,19 @@ fn test_apply_tool_calls() {
 #[test]
 fn test_chat_completion_params_builder() {
   let mut params_builder = ChatCompletionParamsBuilder::new();
-  params_builder.temperature(0.7).top_p(0.9).max_tokens(10000);
+  params_builder
+    .temperature(0.7)
+    .top_p(0.9)
+    .max_tokens(10000)
+    .include_usage();
   params_builder.insert("customized_key", json!("customized_value"));
   let params = params_builder.build();
   assert_eq!(params["temperature"], 0.7);
   assert_eq!(params["top_p"], 0.9);
   assert_eq!(params["max_tokens"], 10000);
   assert_eq!(params["customized_key"], "customized_value");
-  assert_eq!(params.len(), 4);
+  assert_eq!(params["stream_options"], json!({"include_usage": true}));
+  assert_eq!(params.len(), 5);
 }
 
 #[test]
@@ -223,6 +228,7 @@ fn test_chat_stream_chunk_split_reassembly() {
           deltas.push(content);
         }
       }
+      Some(ChatResponseChunk::Usage(_)) => {}
       Some(ChatResponseChunk::Done) => done = true,
       None => {}
     }
@@ -239,6 +245,7 @@ fn test_chat_stream_chunk_split_reassembly() {
           deltas.push(content);
         }
       }
+      Some(ChatResponseChunk::Usage(_)) => {}
       Some(ChatResponseChunk::Done) => done = true,
       None => {}
     }
@@ -250,6 +257,7 @@ fn test_chat_stream_chunk_split_reassembly() {
           deltas.push(content);
         }
       }
+      Some(ChatResponseChunk::Usage(_)) => {}
       Some(ChatResponseChunk::Done) => done = true,
       None => {}
     }
@@ -257,6 +265,91 @@ fn test_chat_stream_chunk_split_reassembly() {
 
   assert_eq!(deltas, vec!["Hello".to_string(), " world".to_string()]);
   assert!(done, "the [DONE] marker must be detected");
+}
+
+#[test]
+fn test_get_model_response_chunk_usage() {
+  // The final chunk of an OpenAI-compatible stream carries `usage` with empty `choices`.
+  let client = ChatClient::init("http://localhost".to_string(), None);
+  // DeepSeek extras (`prompt_cache_hit_tokens` ...) must be tolerated/ignored.
+  let usage_chunk = "{\"choices\": [], \"usage\": {\"prompt_tokens\": 12, \"completion_tokens\": 34, \"total_tokens\": 46, \"prompt_tokens_details\": {\"cached_tokens\": 5}, \"completion_tokens_details\": {\"reasoning_tokens\": 7}, \"prompt_cache_hit_tokens\": 100, \"prompt_cache_miss_tokens\": 200}}";
+  let message = format!("data: {}\n", usage_chunk);
+  match client.get_model_response_chunk(&message) {
+    Some(ChatResponseChunk::Usage(usage)) => {
+      assert_eq!(usage.prompt_tokens, Some(12));
+      assert_eq!(usage.completion_tokens, Some(34));
+      assert_eq!(usage.total_tokens, Some(46));
+      assert_eq!(
+        usage.prompt_tokens_details.as_ref().unwrap().cached_tokens,
+        Some(5)
+      );
+      assert_eq!(
+        usage
+          .completion_tokens_details
+          .as_ref()
+          .unwrap()
+          .reasoning_tokens,
+        Some(7)
+      );
+    }
+    _ => panic!("expected a Usage chunk"),
+  }
+}
+
+#[test]
+fn test_get_model_response_chunk_delta_wins_over_usage() {
+  // A chunk carrying both a delta and usage must be parsed as the delta.
+  let client = ChatClient::init("http://localhost".to_string(), None);
+  let both_chunk = r#"{"choices": [{"delta": {"content": "hi"}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}"#;
+  let message = format!("data: {}\n", both_chunk);
+  match client.get_model_response_chunk(&message) {
+    Some(ChatResponseChunk::Delta(delta)) => {
+      assert_eq!(delta.content.as_deref(), Some("hi"));
+    }
+    _ => panic!("expected a Delta chunk when both delta and usage are present"),
+  }
+}
+
+#[test]
+fn test_chat_completion_usage_partial_deserialize() {
+  // Providers may omit fields; everything must stay optional.
+  let usage: ChatCompletionUsage = serde_json::from_str(r#"{"prompt_tokens": 3}"#).unwrap();
+  assert_eq!(usage.prompt_tokens, Some(3));
+  assert_eq!(usage.completion_tokens, None);
+  assert_eq!(usage.total_tokens, None);
+  assert!(usage.prompt_tokens_details.is_none());
+  assert!(usage.completion_tokens_details.is_none());
+}
+
+#[test]
+fn test_chat_completion_stream_event_mapping() {
+  // The stream loop maps ChatResponseChunk variants onto ChatCompletionStreamEvent.
+  let client = ChatClient::init("http://localhost".to_string(), None);
+
+  let usage_message = "data: {\"choices\": [], \"usage\": {\"prompt_tokens\": 12, \"completion_tokens\": 34, \"total_tokens\": 46}}\n";
+  let event = match client.get_model_response_chunk(usage_message) {
+    Some(ChatResponseChunk::Usage(u)) => ChatCompletionStreamEvent::Usage(u),
+    _ => panic!("expected a Usage chunk"),
+  };
+  match event {
+    ChatCompletionStreamEvent::Usage(usage) => {
+      assert_eq!(usage.prompt_tokens, Some(12));
+      assert_eq!(usage.total_tokens, Some(46));
+    }
+    _ => panic!("expected a Usage event"),
+  }
+
+  let delta_message = "data: {\"choices\": [{\"delta\": {\"content\": \"hi\"}}]}\n";
+  let event = match client.get_model_response_chunk(delta_message) {
+    Some(ChatResponseChunk::Delta(d)) => ChatCompletionStreamEvent::Delta(d),
+    _ => panic!("expected a Delta chunk"),
+  };
+  match event {
+    ChatCompletionStreamEvent::Delta(delta) => {
+      assert_eq!(delta.content.as_deref(), Some("hi"));
+    }
+    _ => panic!("expected a Delta event"),
+  }
 }
 
 #[test]

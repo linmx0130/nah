@@ -18,7 +18,8 @@ use crate::ModelConfig;
 use futures_util::pin_mut;
 use futures_util::stream::StreamExt;
 use nah_chat::{
-  ChatClient, ChatCompletionParamsBuilder, ChatMessage, ChatMessageContentValue, ToolCallRequest,
+  ChatClient, ChatCompletionParamsBuilder, ChatCompletionStreamEvent, ChatMessage,
+  ChatMessageContentValue, ToolCallRequest,
 };
 use serde_json::{json, Value};
 use std::fs::{File, OpenOptions};
@@ -241,9 +242,9 @@ impl ChatContext {
       let _ = std::io::stdout().flush();
       let mut chunk_received = 0;
 
-      while let Some(delta_result) = stream.next().await {
-        match delta_result {
-          Ok(delta) => {
+      while let Some(event_result) = stream.next().await {
+        match event_result {
+          Ok(ChatCompletionStreamEvent::Delta(delta)) => {
             message.apply_model_response_chunk(delta);
             chunk_received += 1;
             print!(
@@ -251,6 +252,9 @@ impl ChatContext {
               chunk_received
             );
             let _ = std::io::stdout().flush();
+          }
+          Ok(ChatCompletionStreamEvent::Usage(_usage)) => {
+            // Token usage of the call; not displayed in the chat UI.
           }
           Err(e) => {
             return Err(NahError::model_error(

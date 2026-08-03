@@ -240,10 +240,16 @@ impl Extend<ChatResponseChunkDelta> for ChatMessage {
 
 /**
  * A chunk of chat message response from the assistant.
+ *
+ * The `Usage` variant carries the token usage of the whole call. OpenAI-compatible
+ * streaming APIs only send it in the final chunk (with empty `choices`) when the
+ * request sets `stream_options.include_usage`. It arrives after the last delta,
+ * right before `[DONE]`, and is the authoritative count for that call.
  */
 #[derive(Debug, Clone)]
 pub enum ChatResponseChunk {
   Delta(ChatResponseChunkDelta),
+  Usage(ChatCompletionUsage),
   Done,
 }
 
@@ -257,6 +263,44 @@ pub struct ChatResponseChunkDelta {
   #[serde(rename = "reasoning_content")]
   pub reasoning_content: Option<String>,
   pub tool_calls: Option<Vec<ToolCallRequestChunkDelta>>,
+}
+
+/**
+ * Token usage of a chat completion request, reported by the server.
+ *
+ * All fields are optional so that partial provider responses still deserialize
+ * (DeepSeek-specific extras such as `prompt_cache_hit_tokens` are ignored).
+ */
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ChatCompletionUsage {
+  #[serde(default)]
+  pub prompt_tokens: Option<u64>,
+  #[serde(default)]
+  pub completion_tokens: Option<u64>,
+  #[serde(default)]
+  pub total_tokens: Option<u64>,
+  #[serde(default)]
+  pub prompt_tokens_details: Option<PromptTokensDetails>,
+  #[serde(default)]
+  pub completion_tokens_details: Option<CompletionTokensDetails>,
+}
+
+/**
+ * Detailed token usage of the prompt part.
+ */
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PromptTokensDetails {
+  #[serde(default)]
+  pub cached_tokens: Option<u64>,
+}
+
+/**
+ * Detailed token usage of the completion part.
+ */
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CompletionTokensDetails {
+  #[serde(default)]
+  pub reasoning_tokens: Option<u64>,
 }
 
 /**

@@ -7,11 +7,12 @@ Supported features:
 * Stream generation
 * Tool calls
 * Reasoning content (Qwen3, Deepseek R1, etc)
+* Token usage in the chat completion stream (via `stream_options.include_usage`)
 * Responses API (stream + non-stream, tool calls, reasoning)
 This crate is built on top of `reqwest` and `serde_json`.
 
 ```rust
-use nah_chat::{ChatClient, ChatMessage};
+use nah_chat::{ChatClient, ChatCompletionStreamEvent, ChatMessage};
 use futures_util::{pin_mut, StreamExt};
 
 let chat_client = ChatClient::init(base_url, auth_token);
@@ -27,10 +28,15 @@ pin_mut!(stream);
 let mut message = ChatMessage::new();
 
 // consume the stream
-while let Some(delta_result) = stream.next().await {
-  match delta_result {
-    Ok(delta) => {
+while let Some(event_result) = stream.next().await {
+  match event_result {
+    Ok(ChatCompletionStreamEvent::Delta(delta)) => {
       message.apply_model_response_chunk(delta);
+    }
+    Ok(ChatCompletionStreamEvent::Usage(usage)) => {
+      // The final chunk carries the authoritative token usage of the call.
+      eprintln!("Usage: {} prompt + {} completion tokens",
+                usage.prompt_tokens.unwrap_or(0), usage.completion_tokens.unwrap_or(0));
     }
     Err(e) => {
       eprintln!("Error occurred while processing the chat completion: {}", e);
@@ -38,6 +44,23 @@ while let Some(delta_result) = stream.next().await {
   }
 }
 ```
+
+### Token usage
+
+OpenAI-compatible streaming APIs only report token usage when the request sets
+`stream_options.include_usage`. Use the params builder convenience:
+
+```rust
+let mut params = ChatCompletionParamsBuilder::new();
+params.max_tokens(4096).include_usage();
+```
+
+The server then sends a final chunk with empty `choices` and a top-level `usage` object, which
+`chat_completion_stream` surfaces as a `ChatCompletionStreamEvent::Usage(ChatCompletionUsage)`
+event, yielded after the final delta and right before `[DONE]`. Consumers should treat it as the
+*latest* (authoritative) token count for the call. `ChatCompletionUsage` mirrors `ResponseUsage`:
+all fields are optional (`Option<u64>` + `#[serde(default)]`), so partial provider responses
+deserialize; DeepSeek-specific extras are ignored.
 
 ## Responses API
 

@@ -1,5 +1,17 @@
 CHANGELOG of nah_chat
 ===
+## v0.8.0
+* Add token usage support to the chat completion stream. `chat_completion_stream` now yields
+  `ChatCompletionStreamEvent` (`Delta` / `Usage`) instead of `ChatResponseChunkDelta` — **breaking
+  change**; consumers must match on `ChatCompletionStreamEvent::Delta(..)` /
+  `ChatCompletionStreamEvent::Usage(..)`.
+* New public types: `ChatCompletionUsage`, `PromptTokensDetails`, `CompletionTokensDetails`
+  (re-exported via `pub use message::*`). `ChatResponseChunk` gains a `Usage` variant; chunks
+  with empty `choices` and a top-level `usage` are now parsed instead of silently dropped.
+* `ChatCompletionParamsBuilder::include_usage()` sets `stream_options.include_usage` so the server
+  reports usage in the final stream chunk (OpenAI / DeepSeek / vLLM ...). The `Usage` event arrives
+  after the final delta, right before `[DONE]`, and is the authoritative token count for the call.
+
 ## v0.7.0
 * Add OpenAI Responses API support: `responses()`, `responses_stream()`, `create_responses_request()`,
   `ResponsesInput`, `ResponseInputItem`, `ResponseOutputItem`, `ResponseObject`, `ResponseUsage`,

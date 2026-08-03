@@ -14,12 +14,13 @@
 //! * Stream generation
 //! * Tool calls
 //! * Reasoning content (Qwen3, Deepseek R1, etc)
+//! * Token usage in the chat completion stream (via `stream_options.include_usage`)
 //! * Responses API (stream + non-stream, tool calls, reasoning)
 //!
 //! This crate is built on top of `tokio`, `reqwest` and `serde_json`.
 //!
 //! ```rust
-//! use nah_chat::{ChatClient, ChatMessage};
+//! use nah_chat::{ChatClient, ChatCompletionStreamEvent, ChatMessage};
 //! use futures_util::{pin_mut, StreamExt};
 //!
 //! # async fn make_request_example() {
@@ -42,10 +43,15 @@
 //! let mut message = ChatMessage::new();
 //!
 //! // consume the stream
-//! while let Some(delta_result) = stream.next().await {
-//!   match delta_result {
-//!     Ok(delta) => {
+//! while let Some(event_result) = stream.next().await {
+//!   match event_result {
+//!     Ok(ChatCompletionStreamEvent::Delta(delta)) => {
 //!       message.apply_model_response_chunk(delta);
+//!     }
+//!     Ok(ChatCompletionStreamEvent::Usage(usage)) => {
+//!       // Optional: the final chunk carries the authoritative token usage.
+//!       eprintln!("Usage: {} prompt + {} completion tokens",
+//!                 usage.prompt_tokens.unwrap_or(0), usage.completion_tokens.unwrap_or(0));
 //!     }
 //!     Err(e) => {
 //!       eprintln!("Error occurred while processing the chat completion: {}", e);
@@ -147,6 +153,18 @@ impl ChatCompletionParamsBuilder {
     self.data.insert(name.to_owned(), value);
     self
   }
+
+  /**
+   * Ask the server to include the token usage of the call in the final stream chunk
+   * (OpenAI / DeepSeek / vLLM ...). The usage is reported as a
+   * [ChatCompletionStreamEvent::Usage] right before `[DONE]`.
+   */
+  pub fn include_usage(&mut self) -> &mut Self {
+    self
+      .data
+      .insert("stream_options".to_owned(), json!({"include_usage": true}));
+    self
+  }
 }
 
 impl<'a> std::iter::IntoIterator for &'a ChatCompletionParamsBuilder {
@@ -156,6 +174,20 @@ impl<'a> std::iter::IntoIterator for &'a ChatCompletionParamsBuilder {
   fn into_iter(self) -> Self::IntoIter {
     (&self.data).into_iter()
   }
+}
+
+/**
+ * A parsed event from the chat completion streaming interface.
+ *
+ * `Delta` carries the incremental assistant content (apply it with
+ * [ChatMessage::apply_model_response_chunk]); `Usage` carries the token usage of
+ * the whole call and is yielded after the final delta, right before `[DONE]`
+ * (only when the request sets `stream_options.include_usage`).
+ */
+#[derive(Debug, Clone)]
+pub enum ChatCompletionStreamEvent {
+  Delta(ChatResponseChunkDelta),
+  Usage(ChatCompletionUsage),
 }
 
 /**
@@ -311,6 +343,11 @@ impl ChatClient {
   /**
    * Request chat completion in the async stream approach.
    *
+   * The stream yields [ChatCompletionStreamEvent]s. `Delta` events carry the
+   * incremental assistant content; when the request sets
+   * `stream_options.include_usage` (see [ChatCompletionParamsBuilder::include_usage]),
+   * a `Usage` event is yielded after the final delta, right before `[DONE]`.
+   *
    * Args:
    * * `model` Name of the model to be called.
    * * `messages` An list of [ChatMessage] as the context.
@@ -321,7 +358,7 @@ impl ChatClient {
     model: &str,
     messages: M,
     params: P,
-  ) -> Result<impl Stream<Item = Result<ChatResponseChunkDelta>>>
+  ) -> Result<impl Stream<Item = Result<ChatCompletionStreamEvent>>>
   where
     P: IntoIterator<Item = (&'a String, &'a Value)>,
     M: IntoIterator<Item = &'b ChatMessage>,
@@ -350,10 +387,13 @@ impl ChatClient {
             break;
         };
         for message in buffer.push(&chunk_data) {
-          let delta = self.get_model_response_chunk(&message);
-          match delta {
+          let chunk = self.get_model_response_chunk(&message);
+          match chunk {
             Some(ChatResponseChunk::Delta(d)) => {
-              yield Ok(d);
+              yield Ok(ChatCompletionStreamEvent::Delta(d));
+            }
+            Some(ChatResponseChunk::Usage(u)) => {
+              yield Ok(ChatCompletionStreamEvent::Usage(u));
             }
             Some(ChatResponseChunk::Done) => {
               reach_done = true;
@@ -363,8 +403,14 @@ impl ChatClient {
         }
       }
       for message in buffer.finish() {
-        if let Some(ChatResponseChunk::Delta(d)) = self.get_model_response_chunk(&message) {
-          yield Ok(d);
+        match self.get_model_response_chunk(&message) {
+          Some(ChatResponseChunk::Delta(d)) => {
+            yield Ok(ChatCompletionStreamEvent::Delta(d));
+          }
+          Some(ChatResponseChunk::Usage(u)) => {
+            yield Ok(ChatCompletionStreamEvent::Usage(u));
+          }
+          _ => {}
         }
       }
     };
@@ -373,7 +419,11 @@ impl ChatClient {
 
   /**
    * Parse one complete SSE message (payload between blank lines) from the stream
-   * chat completion API to obtain a chunk delta.
+   * chat completion API to obtain a chunk.
+   *
+   * A normal chunk carries `choices[0].delta` and is parsed as a `Delta`; the
+   * final usage chunk (empty `choices`, top-level `usage`) is parsed as `Usage`.
+   * Both can't normally co-occur, but when they do the `Delta` wins.
    */
   fn get_model_response_chunk(&self, message: &str) -> Option<ChatResponseChunk> {
     let data_str = message
@@ -395,10 +445,15 @@ impl ChatClient {
       .and_then(|choice_value| choice_value.as_object())
       .and_then(|choice_obj| choice_obj.get("delta"));
 
-    delta_value.and_then(|v| match serde_json::from_value(v.to_owned()) {
-      Ok(v) => Some(ChatResponseChunk::Delta(v)),
-      Err(_) => None,
-    })
+    if let Some(delta_value) = delta_value
+      && let Ok(delta) = serde_json::from_value::<ChatResponseChunkDelta>(delta_value.to_owned())
+    {
+      return Some(ChatResponseChunk::Delta(delta));
+    }
+    if let Ok(usage) = serde_json::from_value::<ChatCompletionUsage>(chunk_value["usage"].clone()) {
+      return Some(ChatResponseChunk::Usage(usage));
+    }
+    None
   }
 }
 
