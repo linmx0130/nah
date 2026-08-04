@@ -222,15 +222,16 @@ fn test_chat_stream_chunk_split_reassembly() {
   // Cut the first delta payload in half; the boundary falls inside an event.
   let split_at = fixture.find("Hello").unwrap();
   for message in buffer.push(&fixture.as_bytes()[..split_at]) {
-    match client.get_model_response_chunk(&message) {
-      Some(ChatResponseChunk::Delta(d)) => {
-        if let Some(content) = d.content {
-          deltas.push(content);
+    for chunk in client.get_model_response_chunks(&message) {
+      match chunk {
+        ChatResponseChunk::Delta(d) => {
+          if let Some(content) = d.content {
+            deltas.push(content);
+          }
         }
+        ChatResponseChunk::Usage(_) => {}
+        ChatResponseChunk::Done => done = true,
       }
-      Some(ChatResponseChunk::Usage(_)) => {}
-      Some(ChatResponseChunk::Done) => done = true,
-      None => {}
     }
   }
   assert!(
@@ -239,27 +240,29 @@ fn test_chat_stream_chunk_split_reassembly() {
   );
 
   for message in buffer.push(&fixture.as_bytes()[split_at..]) {
-    match client.get_model_response_chunk(&message) {
-      Some(ChatResponseChunk::Delta(d)) => {
-        if let Some(content) = d.content {
-          deltas.push(content);
+    for chunk in client.get_model_response_chunks(&message) {
+      match chunk {
+        ChatResponseChunk::Delta(d) => {
+          if let Some(content) = d.content {
+            deltas.push(content);
+          }
         }
+        ChatResponseChunk::Usage(_) => {}
+        ChatResponseChunk::Done => done = true,
       }
-      Some(ChatResponseChunk::Usage(_)) => {}
-      Some(ChatResponseChunk::Done) => done = true,
-      None => {}
     }
   }
   for message in buffer.finish() {
-    match client.get_model_response_chunk(&message) {
-      Some(ChatResponseChunk::Delta(d)) => {
-        if let Some(content) = d.content {
-          deltas.push(content);
+    for chunk in client.get_model_response_chunks(&message) {
+      match chunk {
+        ChatResponseChunk::Delta(d) => {
+          if let Some(content) = d.content {
+            deltas.push(content);
+          }
         }
+        ChatResponseChunk::Usage(_) => {}
+        ChatResponseChunk::Done => done = true,
       }
-      Some(ChatResponseChunk::Usage(_)) => {}
-      Some(ChatResponseChunk::Done) => done = true,
-      None => {}
     }
   }
 
@@ -274,8 +277,10 @@ fn test_get_model_response_chunk_usage() {
   // DeepSeek extras (`prompt_cache_hit_tokens` ...) must be tolerated/ignored.
   let usage_chunk = "{\"choices\": [], \"usage\": {\"prompt_tokens\": 12, \"completion_tokens\": 34, \"total_tokens\": 46, \"prompt_tokens_details\": {\"cached_tokens\": 5}, \"completion_tokens_details\": {\"reasoning_tokens\": 7}, \"prompt_cache_hit_tokens\": 100, \"prompt_cache_miss_tokens\": 200}}";
   let message = format!("data: {}\n", usage_chunk);
-  match client.get_model_response_chunk(&message) {
-    Some(ChatResponseChunk::Usage(usage)) => {
+  let chunks = client.get_model_response_chunks(&message);
+  assert_eq!(chunks.len(), 1, "only a Usage chunk expected: {chunks:?}");
+  match &chunks[0] {
+    ChatResponseChunk::Usage(usage) => {
       assert_eq!(usage.prompt_tokens, Some(12));
       assert_eq!(usage.completion_tokens, Some(34));
       assert_eq!(usage.total_tokens, Some(46));
@@ -297,16 +302,27 @@ fn test_get_model_response_chunk_usage() {
 }
 
 #[test]
-fn test_get_model_response_chunk_delta_wins_over_usage() {
-  // A chunk carrying both a delta and usage must be parsed as the delta.
+fn test_get_model_response_chunk_both_delta_and_usage() {
+  // Some providers (DeepSeek) attach `usage` to the *same* chunk as the
+  // final delta instead of a dedicated empty-choices chunk. Both must be
+  // parsed — dropping either loses content or token usage.
   let client = ChatClient::init("http://localhost".to_string(), None);
   let both_chunk = r#"{"choices": [{"delta": {"content": "hi"}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}"#;
   let message = format!("data: {}\n", both_chunk);
-  match client.get_model_response_chunk(&message) {
-    Some(ChatResponseChunk::Delta(delta)) => {
+  let chunks = client.get_model_response_chunks(&message);
+  assert_eq!(chunks.len(), 2, "delta and usage must both be parsed: {chunks:?}");
+  match &chunks[0] {
+    ChatResponseChunk::Delta(delta) => {
       assert_eq!(delta.content.as_deref(), Some("hi"));
     }
-    _ => panic!("expected a Delta chunk when both delta and usage are present"),
+    _ => panic!("expected a Delta chunk"),
+  }
+  match &chunks[1] {
+    ChatResponseChunk::Usage(usage) => {
+      assert_eq!(usage.prompt_tokens, Some(1));
+      assert_eq!(usage.total_tokens, Some(2));
+    }
+    _ => panic!("expected a Usage chunk"),
   }
 }
 
@@ -327,7 +343,7 @@ fn test_chat_completion_stream_event_mapping() {
   let client = ChatClient::init("http://localhost".to_string(), None);
 
   let usage_message = "data: {\"choices\": [], \"usage\": {\"prompt_tokens\": 12, \"completion_tokens\": 34, \"total_tokens\": 46}}\n";
-  let event = match client.get_model_response_chunk(usage_message) {
+  let event = match client.get_model_response_chunks(usage_message).into_iter().next() {
     Some(ChatResponseChunk::Usage(u)) => ChatCompletionStreamEvent::Usage(u),
     _ => panic!("expected a Usage chunk"),
   };
@@ -340,7 +356,7 @@ fn test_chat_completion_stream_event_mapping() {
   }
 
   let delta_message = "data: {\"choices\": [{\"delta\": {\"content\": \"hi\"}}]}\n";
-  let event = match client.get_model_response_chunk(delta_message) {
+  let event = match client.get_model_response_chunks(delta_message).into_iter().next() {
     Some(ChatResponseChunk::Delta(d)) => ChatCompletionStreamEvent::Delta(d),
     _ => panic!("expected a Delta chunk"),
   };

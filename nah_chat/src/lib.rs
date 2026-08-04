@@ -387,30 +387,32 @@ impl ChatClient {
             break;
         };
         for message in buffer.push(&chunk_data) {
-          let chunk = self.get_model_response_chunk(&message);
-          match chunk {
-            Some(ChatResponseChunk::Delta(d)) => {
-              yield Ok(ChatCompletionStreamEvent::Delta(d));
+          for chunk in self.get_model_response_chunks(&message) {
+            match chunk {
+              ChatResponseChunk::Delta(d) => {
+                yield Ok(ChatCompletionStreamEvent::Delta(d));
+              }
+              ChatResponseChunk::Usage(u) => {
+                yield Ok(ChatCompletionStreamEvent::Usage(u));
+              }
+              ChatResponseChunk::Done => {
+                reach_done = true;
+              }
             }
-            Some(ChatResponseChunk::Usage(u)) => {
-              yield Ok(ChatCompletionStreamEvent::Usage(u));
-            }
-            Some(ChatResponseChunk::Done) => {
-              reach_done = true;
-            }
-            None => {}
           }
         }
       }
       for message in buffer.finish() {
-        match self.get_model_response_chunk(&message) {
-          Some(ChatResponseChunk::Delta(d)) => {
-            yield Ok(ChatCompletionStreamEvent::Delta(d));
+        for chunk in self.get_model_response_chunks(&message) {
+          match chunk {
+            ChatResponseChunk::Delta(d) => {
+              yield Ok(ChatCompletionStreamEvent::Delta(d));
+            }
+            ChatResponseChunk::Usage(u) => {
+              yield Ok(ChatCompletionStreamEvent::Usage(u));
+            }
+            _ => {}
           }
-          Some(ChatResponseChunk::Usage(u)) => {
-            yield Ok(ChatCompletionStreamEvent::Usage(u));
-          }
-          _ => {}
         }
       }
     };
@@ -419,24 +421,33 @@ impl ChatClient {
 
   /**
    * Parse one complete SSE message (payload between blank lines) from the stream
-   * chat completion API to obtain a chunk.
+   * chat completion API to obtain the chunks it carries.
    *
-   * A normal chunk carries `choices[0].delta` and is parsed as a `Delta`; the
-   * final usage chunk (empty `choices`, top-level `usage`) is parsed as `Usage`.
-   * Both can't normally co-occur, but when they do the `Delta` wins.
+   * A normal chunk carries `choices[0].delta` and is parsed as a `Delta`; a
+   * chunk with a top-level `usage` object (only sent when the request sets
+   * `stream_options.include_usage`) is parsed as `Usage`.
+   *
+   * Some providers (OpenAI) send usage in a dedicated final chunk with empty
+   * `choices`; others (DeepSeek) attach it to the *same* chunk as the final
+   * delta. Both fields are parsed independently, so neither event is lost
+   * regardless of provider. `usage: null` on ordinary chunks never parses.
    */
-  fn get_model_response_chunk(&self, message: &str) -> Option<ChatResponseChunk> {
+  fn get_model_response_chunks(&self, message: &str) -> Vec<ChatResponseChunk> {
     let data_str = message
       .lines()
       .find_map(|line| line.strip_prefix("data:"))
-      .map(str::trim)?;
+      .map(str::trim);
+    let Some(data_str) = data_str else {
+      return Vec::new();
+    };
     if data_str == "[DONE]" {
-      return Some(ChatResponseChunk::Done);
+      return vec![ChatResponseChunk::Done];
     }
     let chunk_value: Value = match serde_json::from_str(data_str) {
       Ok(v) => v,
-      Err(_) => return None,
+      Err(_) => return Vec::new(),
     };
+    let mut chunks = Vec::new();
     let delta_value = chunk_value
       .as_object()
       .and_then(|chunk| chunk.get("choices"))
@@ -444,16 +455,17 @@ impl ChatClient {
       .and_then(|choices_arr| choices_arr.first())
       .and_then(|choice_value| choice_value.as_object())
       .and_then(|choice_obj| choice_obj.get("delta"));
-
     if let Some(delta_value) = delta_value
       && let Ok(delta) = serde_json::from_value::<ChatResponseChunkDelta>(delta_value.to_owned())
     {
-      return Some(ChatResponseChunk::Delta(delta));
+      chunks.push(ChatResponseChunk::Delta(delta));
     }
+    // `usage` is `null` on ordinary chunks; deserializing null into the
+    // struct fails, so only a real usage object produces a `Usage` chunk.
     if let Ok(usage) = serde_json::from_value::<ChatCompletionUsage>(chunk_value["usage"].clone()) {
-      return Some(ChatResponseChunk::Usage(usage));
+      chunks.push(ChatResponseChunk::Usage(usage));
     }
-    None
+    chunks
   }
 }
 
