@@ -310,7 +310,11 @@ fn test_get_model_response_chunk_both_delta_and_usage() {
   let both_chunk = r#"{"choices": [{"delta": {"content": "hi"}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}"#;
   let message = format!("data: {}\n", both_chunk);
   let chunks = client.get_model_response_chunks(&message);
-  assert_eq!(chunks.len(), 2, "delta and usage must both be parsed: {chunks:?}");
+  assert_eq!(
+    chunks.len(),
+    2,
+    "delta and usage must both be parsed: {chunks:?}"
+  );
   match &chunks[0] {
     ChatResponseChunk::Delta(delta) => {
       assert_eq!(delta.content.as_deref(), Some("hi"));
@@ -343,7 +347,11 @@ fn test_chat_completion_stream_event_mapping() {
   let client = ChatClient::init("http://localhost".to_string(), None);
 
   let usage_message = "data: {\"choices\": [], \"usage\": {\"prompt_tokens\": 12, \"completion_tokens\": 34, \"total_tokens\": 46}}\n";
-  let event = match client.get_model_response_chunks(usage_message).into_iter().next() {
+  let event = match client
+    .get_model_response_chunks(usage_message)
+    .into_iter()
+    .next()
+  {
     Some(ChatResponseChunk::Usage(u)) => ChatCompletionStreamEvent::Usage(u),
     _ => panic!("expected a Usage chunk"),
   };
@@ -356,7 +364,11 @@ fn test_chat_completion_stream_event_mapping() {
   }
 
   let delta_message = "data: {\"choices\": [{\"delta\": {\"content\": \"hi\"}}]}\n";
-  let event = match client.get_model_response_chunks(delta_message).into_iter().next() {
+  let event = match client
+    .get_model_response_chunks(delta_message)
+    .into_iter()
+    .next()
+  {
     Some(ChatResponseChunk::Delta(d)) => ChatCompletionStreamEvent::Delta(d),
     _ => panic!("expected a Delta chunk"),
   };
