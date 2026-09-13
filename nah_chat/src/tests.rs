@@ -115,10 +115,9 @@ fn test_chat_completion_params_builder_reasoning_effort() {
 
   // Absent by default: the field must never be sent unless asked for.
   assert!(
-    ChatCompletionParamsBuilder::new()
+    !ChatCompletionParamsBuilder::new()
       .build()
-      .get("reasoning_effort")
-      .is_none()
+      .contains_key("reasoning_effort")
   );
 }
 
