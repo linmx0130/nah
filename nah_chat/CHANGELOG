@@ -1,5 +1,13 @@
 CHANGELOG of nah_chat
 ===
+## Unreleased
+* `ChatCompletionParamsBuilder::reasoning_effort()` sets the top-level `reasoning_effort`
+  parameter of the chat completion API.
+* `ResponsesParamsBuilder::reasoning_effort()` sets `reasoning.effort` of the Responses API,
+  merging into an existing `reasoning` object (other keys, e.g. `summary`, are preserved).
+* Additive only — `insert()` / `reasoning(Value)` behaviour is unchanged; no new public types and
+  no version bump.
+
 ## v0.8.0
 * Add token usage support to the chat completion stream. `chat_completion_stream` now yields
   `ChatCompletionStreamEvent` (`Delta` / `Usage`) instead of `ChatResponseChunkDelta` — **breaking

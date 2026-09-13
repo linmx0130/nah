@@ -14,6 +14,8 @@
 //! * Stream generation
 //! * Tool calls
 //! * Reasoning content (Qwen3, Deepseek R1, etc)
+//! * Reasoning effort control (`reasoning_effort` in the chat completion API,
+//!   `reasoning.effort` in the Responses API)
 //! * Token usage in the chat completion stream (via `stream_options.include_usage`)
 //! * Responses API (stream + non-stream, tool calls, reasoning)
 //!
@@ -143,6 +145,27 @@ impl ChatCompletionParamsBuilder {
       "frequency_penalty".to_owned(),
       Value::Number(Number::from_f64(p).unwrap()),
     );
+    self
+  }
+
+  /**
+   * Set the `reasoning_effort` parameter of the chat completion API.
+   *
+   * The value is sent verbatim and validated by the server: OpenAI reasoning
+   * models take `none` / `minimal` / `low` / `medium` / `high` / `xhigh` /
+   * `max`, DeepSeek takes `low` / `high` / `max`. Which values are accepted is
+   * model-dependent.
+   *
+   * This is the chat completion spelling (a top-level field); the Responses API
+   * nests the same setting as `reasoning.effort` (see
+   * [ResponsesParamsBuilder::reasoning_effort]). Providers that additionally
+   * need a thinking mode toggle (DeepSeek `thinking`, Qwen3 `enable_thinking`)
+   * can be configured with [ChatCompletionParamsBuilder::insert].
+   */
+  pub fn reasoning_effort(&mut self, effort: &str) -> &mut Self {
+    self
+      .data
+      .insert("reasoning_effort".to_owned(), json!(effort));
     self
   }
 

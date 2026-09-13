@@ -21,7 +21,7 @@ async fn main() -> std::io::Result<()> {
   let mut params = ResponsesParamsBuilder::new();
   params
     .instructions("You are a helpful assistant.")
-    .reasoning(serde_json::json!({"effort": "high"}));
+    .reasoning_effort("high");
 
   println!("== Non-stream ==");
   let response = client.responses(&model, &input, &params).await.unwrap();

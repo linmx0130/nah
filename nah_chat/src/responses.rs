@@ -371,6 +371,28 @@ impl ResponsesParamsBuilder {
     self
   }
 
+  /**
+   * Set the `reasoning.effort` parameter — the Responses API spelling of the
+   * chat completion `reasoning_effort` parameter.
+   *
+   * The value is sent verbatim and validated by the server (DeepSeek takes
+   * `low` / `high` / `max`, and uses `"none"` to disable thinking mode). Only
+   * `effort` is written: other keys of an existing `reasoning` object
+   * (e.g. `summary`, `mode`) are preserved, so this can be combined with
+   * [ResponsesParamsBuilder::reasoning].
+   */
+  pub fn reasoning_effort(&mut self, effort: &str) -> &mut Self {
+    let mut reasoning = match self.data.remove("reasoning") {
+      Some(Value::Object(object)) => object,
+      _ => serde_json::Map::new(),
+    };
+    reasoning.insert("effort".to_owned(), json!(effort));
+    self
+      .data
+      .insert("reasoning".to_owned(), Value::Object(reasoning));
+    self
+  }
+
   /** Set the `text` parameter, e.g. `json!({"format": {"type": "json_object"}})`. */
   pub fn text(&mut self, text: Value) -> &mut Self {
     self.data.insert("text".to_owned(), text);
@@ -1094,6 +1116,28 @@ data: {\"sequence_number\":1,\"foo\":\"bar\"}
     assert_eq!(data["reasoning"]["effort"], "high");
     assert_eq!(data["customized_key"], "customized_value");
     assert_eq!(data.len(), 7);
+  }
+
+  #[test]
+  fn test_responses_reasoning_effort_merges_into_existing_object() {
+    // effort after a raw reasoning object: the other keys survive
+    let mut params = ResponsesParamsBuilder::new();
+    params
+      .reasoning(serde_json::json!({"summary": "detailed"}))
+      .reasoning_effort("max");
+    let data = params.build();
+    assert_eq!(data["reasoning"]["effort"], "max");
+    assert_eq!(data["reasoning"]["summary"], "detailed");
+
+    // reasoning(Value) stays a whole-object setter (documented, unchanged) and
+    // therefore replaces a previously set effort.
+    let mut params = ResponsesParamsBuilder::new();
+    params
+      .reasoning_effort("low")
+      .reasoning(serde_json::json!({"summary": "auto"}));
+    let data = params.build();
+    assert_eq!(data["reasoning"]["summary"], "auto");
+    assert!(data["reasoning"].get("effort").is_none());
   }
 
   #[test]
