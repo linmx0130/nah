@@ -245,6 +245,27 @@ fn test_responses_request_body() {
 }
 
 #[test]
+fn test_responses_request_body_reasoning_effort() {
+  use crate::responses::{ResponsesInput, ResponsesParamsBuilder};
+  let client = ChatClient::init("https://api.deepseek.com".to_string(), None);
+  let mut params = ResponsesParamsBuilder::new();
+  params
+    .instructions("You are helpful.")
+    .reasoning_effort("high");
+  let input = ResponsesInput::Text("Hi".to_string());
+  let req = client
+    .create_responses_request("deepseek-v4-flash", &input, false, &params)
+    .build()
+    .unwrap();
+  let body: serde_json::Value =
+    serde_json::from_slice(req.body().unwrap().as_bytes().unwrap()).unwrap();
+  assert_eq!(body["reasoning"]["effort"], "high");
+  // The Responses API nests the effort under `reasoning`; the flat field is the
+  // chat completion spelling and would be ignored here.
+  assert!(body.get("reasoning_effort").is_none());
+}
+
+#[test]
 fn test_chat_stream_chunk_split_reassembly() {
   // SSE events split across network chunks must not be lost.
   use crate::responses::SseBuffer;
