@@ -147,6 +147,27 @@ impl ChatCompletionParamsBuilder {
   }
 
   /**
+   * Set the `reasoning_effort` parameter of the chat completion API.
+   *
+   * The value is sent verbatim and validated by the server: OpenAI reasoning
+   * models take `none` / `minimal` / `low` / `medium` / `high` / `xhigh` /
+   * `max`, DeepSeek takes `low` / `high` / `max`. Which values are accepted is
+   * model-dependent.
+   *
+   * This is the chat completion spelling (a top-level field); the Responses API
+   * nests the same setting as `reasoning.effort` (see
+   * [ResponsesParamsBuilder::reasoning_effort]). Providers that additionally
+   * need a thinking mode toggle (DeepSeek `thinking`, Qwen3 `enable_thinking`)
+   * can be configured with [ChatCompletionParamsBuilder::insert].
+   */
+  pub fn reasoning_effort(&mut self, effort: &str) -> &mut Self {
+    self
+      .data
+      .insert("reasoning_effort".to_owned(), json!(effort));
+    self
+  }
+
+  /**
    * Set a parameter with key of `name` and value of `value`.
    */
   pub fn insert(&mut self, name: &str, value: Value) -> &mut Self {

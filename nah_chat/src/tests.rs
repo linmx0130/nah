@@ -103,6 +103,44 @@ fn test_chat_completion_params_builder() {
 }
 
 #[test]
+fn test_chat_completion_params_builder_reasoning_effort() {
+  let mut params = ChatCompletionParamsBuilder::new();
+  params.reasoning_effort("high");
+  assert_eq!(params.build()["reasoning_effort"], "high");
+
+  // The value is passed through verbatim (provider-specific / future values).
+  let mut params = ChatCompletionParamsBuilder::new();
+  params.reasoning_effort("max");
+  assert_eq!(params.build()["reasoning_effort"], "max");
+
+  // Absent by default: the field must never be sent unless asked for.
+  assert!(
+    ChatCompletionParamsBuilder::new()
+      .build()
+      .get("reasoning_effort")
+      .is_none()
+  );
+}
+
+#[test]
+fn test_chat_completion_request_body_reasoning_effort() {
+  let client = ChatClient::init("https://api.deepseek.com".to_string(), None);
+  let messages = vec![ChatMessage::user_text_message("Hi")];
+  let mut params = ChatCompletionParamsBuilder::new();
+  params.reasoning_effort("high");
+  let req = client
+    .create_chat_completion_request("deepseek-chat", &messages, true, &params)
+    .build()
+    .unwrap();
+  let body: serde_json::Value =
+    serde_json::from_slice(req.body().unwrap().as_bytes().unwrap()).unwrap();
+  assert_eq!(body["reasoning_effort"], "high");
+  // The chat completions API is FLAT: no nested `reasoning` object (that is the
+  // Responses API spelling and would be ignored here).
+  assert!(body.get("reasoning").is_none());
+}
+
+#[test]
 fn test_collect_chat_response_chunk_delta() {
   let delta = vec![
     ChatResponseChunkDelta {
