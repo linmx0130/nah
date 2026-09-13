@@ -14,6 +14,8 @@
 //! * Stream generation
 //! * Tool calls
 //! * Reasoning content (Qwen3, Deepseek R1, etc)
+//! * Reasoning effort control (`reasoning_effort` in the chat completion API,
+//!   `reasoning.effort` in the Responses API)
 //! * Token usage in the chat completion stream (via `stream_options.include_usage`)
 //! * Responses API (stream + non-stream, tool calls, reasoning)
 //!

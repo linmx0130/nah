@@ -27,6 +27,25 @@ For Qwen3 models where you have controls on whether to enable thinkings, using f
 }
 ```
 
+Reasoning effort can be set through `extraParams` as well, without any code change; it is sent as
+the top-level `reasoning_effort` field of the chat completion API:
+```json
+{
+    "model": {
+        "baseUrl": "https://api.deepseek.com",
+        "model": "deepseek-v4-flash",
+        "authToken": "<AUTH_TOKEN_HERE>",
+        "extraParams": {
+            "reasoning_effort": "high"
+        }
+    },
+    "mcpServers": {...}
+}
+```
+Note that `nah` also sends `temperature`, `frequency_penalty` and `top_p`; providers with a
+thinking mode may ignore or clamp some of them (DeepSeek ignores `temperature` and
+`frequency_penalty` in thinking mode and raises `top_p` to at least 0.95).
+
 After launching `nah`, it will active all MCP servers declared in the config file and provide a shell-like user interface. Here are some useful commands supported by `nah`.
 * `chat`:             Chat with a LLM with all tools installed.
 * `use`:              Select a MCP server to interactive with.

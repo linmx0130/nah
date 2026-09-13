@@ -7,6 +7,8 @@ Supported features:
 * Stream generation
 * Tool calls
 * Reasoning content (Qwen3, Deepseek R1, etc)
+* Reasoning effort control (`reasoning_effort` in the chat completion API, `reasoning.effort` in
+  the Responses API)
 * Token usage in the chat completion stream (via `stream_options.include_usage`)
 * Responses API (stream + non-stream, tool calls, reasoning)
 This crate is built on top of `reqwest` and `serde_json`.
@@ -61,6 +63,44 @@ event, yielded after the final delta and right before `[DONE]`. Consumers should
 *latest* (authoritative) token count for the call. `ChatCompletionUsage` mirrors `ResponseUsage`:
 all fields are optional (`Option<u64>` + `#[serde(default)]`), so partial provider responses
 deserialize; DeepSeek-specific extras are ignored.
+
+### Reasoning effort
+
+The two APIs spell the reasoning effort hint differently:
+
+| API | Request field | Typical values |
+|---|---|---|
+| Chat completion | `reasoning_effort` (top level) | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
+| Responses | `reasoning.effort` (nested in `reasoning`) | same |
+
+```rust
+use nah_chat::{ChatCompletionParamsBuilder, ResponsesParamsBuilder};
+
+let mut params = ChatCompletionParamsBuilder::new();
+params.max_tokens(4096).reasoning_effort("high");
+
+let mut params = ResponsesParamsBuilder::new();
+params.reasoning_effort("high");
+```
+
+The string is sent verbatim, so provider-specific values keep working; which values a model accepts
+is model-dependent, and an unsupported value is rejected by the server (HTTP 400).
+`reasoning_effort` merges into an existing `reasoning` object, so it can be combined with the raw
+setter: `params.reasoning(serde_json::json!({"summary": "auto"})).reasoning_effort("high")`.
+
+**DeepSeek thinking mode**: the effort is `low` / `high` / `max` (other values are mapped by the
+server, e.g. `medium` -> `high`); thinking itself is toggled by a separate field — `thinking:
+{"type": "enabled" | "disabled"}` in the chat completion API, or `reasoning.effort: "none"` in the
+Responses API. Pass the toggle through the escape hatch:
+
+```rust
+let mut params = ChatCompletionParamsBuilder::new();
+params.reasoning_effort("max");
+params.insert("thinking", serde_json::json!({"type": "enabled"}));
+```
+
+In DeepSeek thinking mode `temperature`, `frequency_penalty` and `presence_penalty` have no effect
+and `top_p` is clamped to >= 0.95.
 
 ## Responses API
 
