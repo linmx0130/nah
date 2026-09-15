@@ -84,6 +84,195 @@ fn test_apply_tool_calls() {
   }
 }
 
+/**
+ * Build a chunk delta that carries a single tool call at `index`. `None` leaves
+ * a field absent from the chunk, like a well-behaved streaming provider does for
+ * the fields it does not resend.
+ */
+fn tool_call_delta(
+  index: usize,
+  id: Option<&str>,
+  call_type: Option<&str>,
+  name: Option<&str>,
+  arguments: Option<&str>,
+) -> ChatResponseChunkDelta {
+  let function = if name.is_some() || arguments.is_some() {
+    Some(FunctionCallRequestChunkDelta {
+      name: name.map(str::to_owned),
+      arguments: arguments.map(str::to_owned),
+    })
+  } else {
+    None
+  };
+  ChatResponseChunkDelta {
+    role: None,
+    content: None,
+    reasoning_content: None,
+    tool_calls: Some(vec![ToolCallRequestChunkDelta {
+      index,
+      id: id.map(str::to_owned),
+      _type: call_type.map(str::to_owned),
+      function,
+    }]),
+  }
+}
+
+#[test]
+fn test_apply_tool_call_repeated_id_and_type_are_not_duplicated() {
+  // Some providers resend the *complete* tool call `id` and `type` in every
+  // delta chunk of the same tool call. Replacing the value with the same string
+  // must be idempotent instead of concatenating it again (which would produce
+  // e.g. "call_abc123call_abc123").
+  let mut message = ChatMessage::new();
+  message.apply_model_response_chunk(tool_call_delta(
+    0,
+    Some("call_abc123"),
+    Some("function"),
+    Some("get_weather"),
+    Some(""),
+  ));
+  message.apply_model_response_chunk(tool_call_delta(
+    0,
+    Some("call_abc123"),
+    Some("function"),
+    None,
+    Some("{\"city\""),
+  ));
+  message.apply_model_response_chunk(tool_call_delta(
+    0,
+    Some("call_abc123"),
+    Some("function"),
+    None,
+    Some(":\"SF\"}"),
+  ));
+
+  let tool_calls = message.tool_calls.as_ref().unwrap();
+  assert_eq!(tool_calls.len(), 1);
+  assert_eq!(tool_calls[0].id, "call_abc123");
+  assert_eq!(tool_calls[0]._type, "function");
+  assert_eq!(tool_calls[0].function.name, "get_weather");
+  assert_eq!(tool_calls[0].function.arguments, "{\"city\":\"SF\"}");
+}
+
+#[test]
+fn test_apply_tool_call_new_id_and_type_replace_the_previous_value() {
+  // `id` / `type` are complete values, not token streams, so a later non-empty
+  // value replaces the one accumulated so far (last value wins).
+  let mut message = ChatMessage::new();
+  message.apply_model_response_chunk(tool_call_delta(
+    0,
+    Some("call_old"),
+    Some("function"),
+    Some("get_weather"),
+    Some(""),
+  ));
+  message.apply_model_response_chunk(tool_call_delta(
+    0,
+    Some("call_new"),
+    Some("function"),
+    None,
+    Some("{}"),
+  ));
+
+  let tool_calls = message.tool_calls.as_ref().unwrap();
+  assert_eq!(tool_calls.len(), 1);
+  assert_eq!(tool_calls[0].id, "call_new");
+  assert_eq!(tool_calls[0]._type, "function");
+  assert_eq!(tool_calls[0].function.name, "get_weather");
+  assert_eq!(tool_calls[0].function.arguments, "{}");
+}
+
+#[test]
+fn test_apply_tool_call_empty_id_and_type_do_not_clobber() {
+  // A provider may send an empty string instead of omitting `id`/`type` on the
+  // deltas that do not carry them; an empty value must not erase the real one.
+  let mut message = ChatMessage::new();
+  message.apply_model_response_chunk(tool_call_delta(
+    0,
+    Some("call_abc123"),
+    Some("function"),
+    Some("get_weather"),
+    Some("{\"a"),
+  ));
+  message.apply_model_response_chunk(tool_call_delta(0, Some(""), Some(""), None, Some(":1}")));
+
+  let tool_calls = message.tool_calls.as_ref().unwrap();
+  assert_eq!(tool_calls.len(), 1);
+  assert_eq!(tool_calls[0].id, "call_abc123");
+  assert_eq!(tool_calls[0]._type, "function");
+  assert_eq!(tool_calls[0].function.name, "get_weather");
+  assert_eq!(tool_calls[0].function.arguments, "{\"a:1}");
+}
+
+#[test]
+fn test_apply_tool_call_repeated_id_and_type_per_index() {
+  // Parallel tool calls: the keep-vs-append decision must be made per index, so
+  // one tool call resending its id does not affect another one.
+  let mut message = ChatMessage::new();
+  message.apply_model_response_chunk(ChatResponseChunkDelta {
+    role: None,
+    content: None,
+    reasoning_content: None,
+    tool_calls: Some(vec![
+      ToolCallRequestChunkDelta {
+        index: 0,
+        id: Some("call_0".to_owned()),
+        _type: Some("function".to_owned()),
+        function: Some(FunctionCallRequestChunkDelta {
+          name: Some("first".to_owned()),
+          arguments: Some(String::new()),
+        }),
+      },
+      ToolCallRequestChunkDelta {
+        index: 1,
+        id: Some("call_1".to_owned()),
+        _type: Some("function".to_owned()),
+        function: Some(FunctionCallRequestChunkDelta {
+          name: Some("second".to_owned()),
+          arguments: Some(String::new()),
+        }),
+      },
+    ]),
+  });
+  // Resend the full id/type for both tool calls, then stream the arguments.
+  message.apply_model_response_chunk(ChatResponseChunkDelta {
+    role: None,
+    content: None,
+    reasoning_content: None,
+    tool_calls: Some(vec![
+      ToolCallRequestChunkDelta {
+        index: 0,
+        id: Some("call_0".to_owned()),
+        _type: Some("function".to_owned()),
+        function: Some(FunctionCallRequestChunkDelta {
+          name: None,
+          arguments: Some("{\"a\":1}".to_owned()),
+        }),
+      },
+      ToolCallRequestChunkDelta {
+        index: 1,
+        id: Some("call_1".to_owned()),
+        _type: Some("function".to_owned()),
+        function: Some(FunctionCallRequestChunkDelta {
+          name: None,
+          arguments: Some("{\"b\":2}".to_owned()),
+        }),
+      },
+    ]),
+  });
+
+  let tool_calls = message.tool_calls.as_ref().unwrap();
+  assert_eq!(tool_calls.len(), 2);
+  assert_eq!(tool_calls[0].id, "call_0");
+  assert_eq!(tool_calls[0]._type, "function");
+  assert_eq!(tool_calls[0].function.name, "first");
+  assert_eq!(tool_calls[0].function.arguments, "{\"a\":1}");
+  assert_eq!(tool_calls[1].id, "call_1");
+  assert_eq!(tool_calls[1]._type, "function");
+  assert_eq!(tool_calls[1].function.name, "second");
+  assert_eq!(tool_calls[1].function.arguments, "{\"b\":2}");
+}
+
 #[test]
 fn test_chat_completion_params_builder() {
   let mut params_builder = ChatCompletionParamsBuilder::new();
