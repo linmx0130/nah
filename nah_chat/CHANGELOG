@@ -7,6 +7,10 @@ CHANGELOG of nah_chat
   merging into an existing `reasoning` object (other keys, e.g. `summary`, are preserved).
 * Additive only — `insert()` / `reasoning(Value)` behaviour is unchanged; no new public types and
   no version bump.
+* Fix tool call `id` / `type` duplication in streamed chat completion deltas. Some providers resend
+  the complete value in every chunk of the same tool call; it was concatenated and grew
+  (`call_abccall_abc`). `id` / `type` are complete scalars, so they now use last-non-empty-wins
+  semantics, while `function.arguments` / `function.name` keep accumulating.
 
 ## v0.8.0
 * Add token usage support to the chat completion stream. `chat_completion_stream` now yields

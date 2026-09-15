@@ -175,12 +175,22 @@ impl ChatMessage {
           });
         }
         let object_to_apply = message_tool_calls.get_mut(idx).unwrap();
+        // `id` and `type` are complete, server-assigned scalars, not token
+        // streams: the latest non-empty value wins. Some providers resend the
+        // full value in every chunk of the same tool call, so appending them
+        // would duplicate the value (e.g. "call_abccall_abc"). An empty string
+        // is treated as "absent" so that a delta carrying `"id": ""` does not
+        // erase the real id.
         tool_call.id.and_then(|id| {
-          object_to_apply.id.push_str(&id);
+          if !id.is_empty() {
+            object_to_apply.id = id;
+          }
           Some(())
         });
         tool_call._type.and_then(|t| {
-          object_to_apply._type.push_str(&t);
+          if !t.is_empty() {
+            object_to_apply._type = t;
+          }
           Some(())
         });
         tool_call.function.and_then(|fcall| {
